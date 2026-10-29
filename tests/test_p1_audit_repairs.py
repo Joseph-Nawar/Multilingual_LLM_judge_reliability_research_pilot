@@ -407,4 +407,3 @@ def test_currency_code_must_exist_in_the_pinned_iso_snapshot():
 def test_tool_parameter_required_flag_is_strictly_boolean():
     with pytest.raises(SchemaValidationError, match="required status must be boolean"):
         ToolParameterSchema("price", "money", required=1)
-
