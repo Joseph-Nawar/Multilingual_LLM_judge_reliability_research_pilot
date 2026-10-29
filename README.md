@@ -8,15 +8,17 @@ The hypotheses are provisional. The study is designed to allow null and negative
 
 | Design element | Planned size |
 | --- | ---: |
-| Canonical scenarios | 48 |
+| Primary consequential-change scenarios | 48 |
 | Domains | 3: booking, customer operations, scheduling |
 | Constraint-transition families | 4: introduction, numerical revision, permission revocation, temporal revision |
 | Counterfactual histories per scenario | 2, with opposite labels for the same action |
 | Language conditions | 4: EN–EN, AR–AR, EN–AR, AR–EN |
-| Derived judge items | 384 |
-| Development / locked evaluation scenarios | 12 / 36 |
+| Primary derived judge items | 384 |
+| Primary development / locked evaluation scenarios | 12 / 36 |
+| Separate no-change control scenarios / items | 12 / 96 (locked auxiliary set proposed) |
+| Total planned scenarios / items | 60 / 480 |
 
-These counts describe the proposed pilot, not a dataset currently present in the repository. See the research specifications before changing or implementing the design.
+These are proposed counts, not a dataset currently present in the repository. Control results remain separate from the primary estimand. The control partition is pending P1 approval. See the research specifications before changing or implementing the design.
 
 ## Research specifications
 

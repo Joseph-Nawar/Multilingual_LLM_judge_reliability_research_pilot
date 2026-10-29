@@ -15,4 +15,6 @@
 
 The inspected work motivates, but does not settle, three candidate pilot conditions: direct multilingual judging, translation-first judging, and criteria-based/structured judging. Among the six requested works, no inspected method establishes a standard translation-first comparator for this specific task. The translation component and structured criterion set therefore need explicit operational definitions, same-model controls where feasible, and review before P3. Do not state that prior work has demonstrated a weakness in either approach; H3 remains a testable proposal.
 
+No implementation in this repository is claimed to reproduce any cited method. A future reproduction claim requires checking the selected paper version, prompts/procedure, model and configuration, inputs, and aggregation against the published method and recording the verification in P3.
+
 SOPBench and Intent-Driven Situation Tracking are useful adjacent work, but both evaluate task-performing agents rather than the judge as the experimental target. AgentJudgeBench is the closest methodological precedent for deterministic reference labels and separate ground-truth access, while still differing substantially in language and interaction structure.
