@@ -2,8 +2,8 @@
 
 **Date:** 2026-10-29
 **Approved base:** `e35a94584518692ee6cc664105fa20bc26770a19`
-**Authorization:** The research owner independently reviewed and approved P0 and authorized P1 only. P2 and later milestones remain unauthorized.
-**Status:** Original schema 1.0 decisions are historical where superseded below. The research owner has accepted the substantive schema 1.1 repairs and decisions recorded in the final review update. A targeted P1-R4 chronology correction is implemented in this branch; the final independent P1 review remains pending. P2 has not started and remains unauthorized.
+**Authorization:** The initial authorization approved P0 and P1 only. The later owner update below records P1 approval and separate authorization for P2A only.
+**Status:** Historical P1 implementation decisions are retained below. The P1 branch passed independent research-owner review at commit `3139cebe6926edeca0997c965617c7a35c3e0d27`. P2A is authorized for a controlled authoring preflight with exactly four local development prototypes. P2B, P2C, and later milestones are not authorized by that decision.
 
 ## Resolved P0 gate and conflict
 
@@ -77,3 +77,15 @@ The public repository contains no study scenarios, Arabic translations, locked l
 Review the schema/version contract, event semantics, oracle reason codes and boundary behavior, pair-integrity rules, deterministic partition manifest, provenance/duplicate reports, and judge/reference separation. P2 may begin only after the research owner accepts the implementation and separately authorizes the milestone.
 
 The P1 verification suite covers all four consequential transition families, exact/inclusive/exclusive numeric boundaries, permission grant/revocation and absent authorization, temporal revision across UTC offsets, preservation of unrelated constraints, ordered events, exact no-change restatements, malicious state-changing controls, causal-pair confounds, chronology mismatches, public tool parameter requirements, pinned currency membership, opposite-label counterfactuals, incorrect declared labels, malformed records, partition allocation and derivative/source leakage, shared template reporting, invariant literal checks, normalized duplicate behavior, judge-projection isolation, and repeated deterministic outputs. All fixtures are synthetic and test-only.
+
+## Final P1 approval and P2A authorization update
+
+**Review date:** 2026-10-29
+
+**Approved P1 commit:** `3139cebe6926edeca0997c965617c7a35c3e0d27`
+
+**Owner disposition:** P1 passed independent research-owner review, including P1-R1 through P1-R4, the currency allowlist repair, schema 1.1, and the bounded constraint types. P2A is separately authorized; P2B, P2C, P3, P4, and P5 remain outside scope.
+
+P2A may establish the authoring protocol, prospective full-study blueprint, bilingual review rubric/utilities, and exactly four local primary development prototypes from distinct domain-transition cells, with their 32 language-condition variants. These records and all translations, semantic-coverage maps, reference labels, packets, and reviewer materials remain under ignored `.research-data/`; only code, documentation, tests, and a redacted aggregate report may be public. No controls or locked scenarios may be authored, and no model calls or dataset freeze are authorized.
+
+The P2A drafts are machine-assisted, not independently validated. The semantic-coverage checker proves only that formal targets are linked to spans in the structurally expected user turns. It does not establish that English or MSA text expresses the linked meaning. Two independent bilingual reviewers and adjudication remain required in P2B. Full dataset authoring, semantic near-duplicate adjudication, empirical template-family inventory, anti-shortcut audit, and partition freeze remain for P2C, subject to a separate authorization and review.

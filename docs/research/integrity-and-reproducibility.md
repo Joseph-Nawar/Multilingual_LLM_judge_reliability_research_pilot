@@ -1,8 +1,8 @@
 # Research integrity and reproducibility
 
-These requirements govern future dataset work and model evaluation. P0 creates no data and makes no model calls.
+These requirements govern dataset work and model evaluation. P0 and P1 created no study data and made no model calls. P2A may keep exactly four development prototypes, language drafts, coverage maps, and review records under ignored local `.research-data/` paths; none may be committed or published. No locked scenarios or auxiliary study controls may be authored in P2A.
 
-P1 is authorized for schema, oracle, and integrity infrastructure only. Its fixtures must be small, synthetic, test-only, and independent of study scenarios; no translated research-language variants or locked benchmark records may be added to the public repository.
+P1 passed independent research-owner review. P2A is authorized only for the authoring protocol, balanced blueprint, bilingual annotation procedure, four local development-only prototypes, and minimal review utilities. Prototype translations are machine-assisted drafts, not validated research-language variants. P2B, P2C, P3, P4, and P5 remain outside this authorization.
 
 ## Reference authority and separated access
 
@@ -15,7 +15,7 @@ P1 is authorized for schema, oracle, and integrity infrastructure only. Its fixt
 ## Dataset and counterfactual integrity
 
 - Preserve the 48-scenario primary consequential-change set (384 items; 12 development and 36 locked scenarios) separately from the 12-scenario no-change control (96 additional items). The control contains later restatements that leave effective meaning unchanged; its paired opposite labels arise from different initial active requirements, not an actual revision within either history.
-- Keep primary and control counts, labels, scoring, and results distinct. The research owner approved all 12 controls as locked auxiliary scenarios in the P1 authorization; this does not authorize control construction during P1.
+- Keep primary and control counts, labels, scoring, and results distinct. The research owner approved all 12 controls as locked auxiliary scenarios in the P1 authorization; P2A does not authorize authoring any control examples.
 - Preserve counterfactual links and assign every history, language variant, and derivative of a canonical scenario to one partition. Keep matched primary-control scenarios linked but separately identified.
 - Balance valid and invalid items within each condition and approved partition. Record domain, condition, set, match, and partition in the manifest.
 - Validate all four language conditions (EN–EN, AR–AR, EN–AR, AR–EN) independently for semantic equivalence, constraint scope, chronology, action meaning, and label preservation. Apply the approved MSA and invariant-literal policy.
@@ -61,7 +61,7 @@ Before locked evaluation, version and hash the primary/control datasets, partiti
 
 ## Model calls and cost
 
-No model calls are permitted during P0 or this P1 implementation. This repository grants no inference budget. Future paid inference requires explicit budget authorization. A future runner must preserve the prompt, raw response, model version, token use, and execution metadata for every attempt, including failures. Language-competence screening is a separate development-only qualification procedure, not a locked evaluation or task-accuracy result.
+No model calls are permitted during P0, P1, or P2A. This repository grants no inference budget. Future paid inference requires explicit budget authorization. A future runner must preserve the prompt, raw response, model version, token use, and execution metadata for every attempt, including failures. Language-competence screening is a separate development-only qualification procedure, not a locked evaluation or task-accuracy result.
 
 ## Independent review and decision ownership
 

@@ -2,7 +2,7 @@
 
 This repository establishes the research foundation for a controlled feasibility study of whether LLM judges correctly classify agent actions when validity depends on user constraints introduced, revised, or revoked across English and Arabic. The object of study is the **judge**; no task-performing agent is evaluated here.
 
-The hypotheses are provisional. The study is designed to allow null and negative results. P0 has been approved and P1 is authorized; this branch implements schema, oracle, and integrity infrastructure only.
+The hypotheses are provisional. The study is designed to allow null and negative results. P0 and P1 have been approved. P2A is authorized for the authoring protocol, review utilities, and exactly four local development-only prototypes; this branch does not authorize the full dataset or model inference.
 
 ## Exploratory pilot at a glance
 
@@ -18,7 +18,7 @@ The hypotheses are provisional. The study is designed to allow null and negative
 | Separate no-change control scenarios / items | 12 / 96 (approved locked auxiliary set) |
 | Total planned scenarios / items | 60 / 480 |
 
-These are approved future counts, not a dataset currently present in the repository. The 12 controls are assigned to a locked auxiliary partition; control results remain separate from the primary estimand. Their matching rules remain reviewable at the P1 gate. See the research specifications before changing or implementing the design.
+These are approved future counts, not a dataset currently present in the public repository. The 12 controls are assigned to a locked auxiliary partition; control results remain separate from the primary estimand. The owner approved matching controls only to locked primary scenarios. No control examples are authored in P2A. See the research specifications before changing or implementing the design.
 
 ## Research specifications
 
@@ -29,7 +29,7 @@ These are approved future counts, not a dataset currently present in the reposit
 - [Prior-work register](docs/research/prior-work.md)
 - [Milestone roadmap and acceptance gates](docs/roadmap.md)
 
-The research documents are authoritative. This README and `AGENTS.md` provide navigation and working guidance only. P0 is approved; P1 implementation is for independent review and does not freeze the protocol or authorize P2.
+The research documents are authoritative. This README and `AGENTS.md` provide navigation and working guidance only. P0 and P1 are approved. P2A is authorized for the authoring procedure and four local development-only prototypes; it does not authorize locked examples, study controls, dataset freezing, or model inference.
 
 ## Development setup
 
@@ -42,8 +42,25 @@ python -m pip install -e '.[dev]'
 python -m pytest
 ```
 
-The only development dependency is pytest. P1 contains typed schema, deterministic oracle, validation, and test-only synthetic fixtures. It contains no study dataset, translation generator, judge adapter, or model runner.
+The only development dependency is pytest. P1 provides the typed schema, deterministic oracle, and integrity validators. P2A adds local preflight and annotation-review utilities. Actual prototypes and their language drafts are stored only under ignored `.research-data/`; the public repository contains no scenario text, translations, reference records, reviewer records, or locked data.
+
+## P2A authoring preflight
+
+Read the [authoring protocol](docs/research/authoring-protocol.md), [scenario blueprint](docs/research/scenario-blueprint.md), and [bilingual annotation protocol](docs/research/bilingual-annotation-protocol.md) before working with local prototype data. The four prototypes are development-only, machine-assisted drafts and are not independently linguistically validated.
+
+With the local research data present, run:
+
+```bash
+python -m multilingual_judge_pilot.preflight validate
+python -m multilingual_judge_pilot.preflight review-packets
+python -m multilingual_judge_pilot.preflight audit-annotations
+python -m multilingual_judge_pilot.preflight isolation
+```
+
+`validate` emits a redacted aggregate report. `review-packets` writes two local label-free packets per prototype. `audit-annotations` checks hash-bound independent annotations and adjudications; an empty or incomplete annotation set remains explicitly incomplete. `isolation` checks that private research-data paths are ignored and not already tracked. Never stage `.research-data/`.
+
+The public aggregate report is [the P2A preflight report](docs/research/p2a-preflight-report.md). It reports deterministic structural and oracle checks only; it does not claim semantic validation.
 
 ## Current boundary
 
-P1 may include only synthetic test fixtures. Do not create the study benchmark, generate research-language variants, execute judge inference, or begin P2 until the P1 review gate is recorded. No paid inference is authorized by this repository setup.
+P2A is the current authorized milestone. It permits exactly four local primary development prototypes and the specified procedures/utilities. Do not create locked scenarios or study controls, generate the complete dataset, begin P2B/P2C/P3/P4/P5, execute judge inference, or make paid API calls without separate authorization. No inference budget is authorized by this repository setup.

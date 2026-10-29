@@ -1,6 +1,6 @@
 # Research protocol and hypotheses
 
-**Status:** P0 specification amended after the 2026-10-29 research-owner audit; not frozen for execution.
+**Status:** P0 specification amended after the 2026-10-29 research-owner audit; P1 has passed independent review and P2A authoring preflight is underway. The protocol is not frozen for execution.
 
 **Study type:** controlled exploratory feasibility pilot.
 
@@ -8,7 +8,7 @@
 
 ## Research question
 
-Do LLM-based evaluators become less reliable when agent-action validity depends on user constraints introduced, revised, or revoked across languages?
+Do LLM judges correctly assess agent actions when effective user constraints evolve across English and Arabic conversations?
 
 The pilot compares English and Arabic conditions with paired scenario content and counterfactual histories. It tests evaluator behavior, not the ability of an agent to complete a task.
 
@@ -50,7 +50,7 @@ Report all four conditions separately, alongside any clearly labeled exploratory
 
 ## Ground truth and label isolation
 
-The canonical task state and deterministic, executable validity rule are authoritative. The P1 oracle applies only typed formal events and constraints; it never interprets conversation text. The rule resolves which constraints are active at action time, including supersession, revocation, numerical bounds, and temporal conditions. For no-change controls, it verifies that a formal restatement leaves the effective state unchanged. Natural-language semantic equivalence remains for independent bilingual validation in P2. LLM output is never a label source.
+The canonical task state and deterministic, executable validity rule are authoritative. The P1 oracle applies only typed formal events and constraints; it never interprets conversation text. The rule resolves which constraints are active at action time, including supersession, revocation, numerical bounds, and temporal conditions. For no-change controls, it verifies that a formal restatement leaves the effective state unchanged. P2A structural coverage is a span-link check only; natural-language semantic equivalence remains for independent bilingual validation in P2B. LLM output is never a label source.
 
 Ordinary judge inference and reference scoring use separated data-access paths. The ordinary judge receives the conversation and action needed for evaluation, but not gold labels, canonical effective states, oracle verdicts, or pairing keys. These materials are also excluded from development-time judge/model selection. The reference scorer consumes the response and opaque item ID through a separate path and cannot supply hidden references back to the judge. Any intervention that exposes canonical effective state is a separately named oracle diagnostic; it is not a fair deployable baseline and is excluded from ordinary-condition summaries.
 
@@ -73,4 +73,4 @@ This pilot is a feasibility study over a small, controlled set of synthetic or a
 
 ## Decisions for the P0 review gate
 
-The 2026-10-29 review decisions and remaining uncertainties are recorded in [the P0 audit decision record](decision-records/2026-10-29-p0-research-audit.md). The research owner approved P0 and authorized P1 only; that authorization does not freeze this protocol, authorize model inference, or begin P2. P1 implementation choices, the approved all-locked control partition, and remaining owner-review proposals are recorded in [the P1 implementation decision record](decision-records/2026-10-29-p1-implementation.md).
+The 2026-10-29 review decisions and remaining uncertainties are recorded in [the P0 audit decision record](decision-records/2026-10-29-p0-research-audit.md). P1 implementation choices and the final P1 owner approval are recorded in [the P1 implementation decision record](decision-records/2026-10-29-p1-implementation.md). P2A is authorized for the authoring procedure and exactly four local development-only prototypes. It does not freeze this protocol, authorize locked examples or controls, or permit model inference.
