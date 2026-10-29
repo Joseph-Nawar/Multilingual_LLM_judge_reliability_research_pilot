@@ -18,7 +18,14 @@ from multilingual_judge_pilot.preflight import (
     verify_research_data_exclusion,
     variant_sha256,
 )
-from multilingual_judge_pilot.schema import TextSegment, TextSegmentKind
+from multilingual_judge_pilot.schema import (
+    HistoryState,
+    PermissionGrant,
+    PermissionKey,
+    Scope,
+    TextSegment,
+    TextSegmentKind,
+)
 from p1_fixtures import english_variant, numerical_revision_pair, with_language_variants
 
 
@@ -28,8 +35,38 @@ def _scenario_with_one_synthetic_variant():
     return with_language_variants(candidate, (variant,))
 
 
+def _scenario_with_initial_permission():
+    candidate = _scenario_with_one_synthetic_variant()
+    grant = PermissionGrant("synthetic-grant", PermissionKey("book_service", Scope.global_scope()))
+    histories = tuple(
+        replace(history, initial_state=HistoryState(history.initial_state.requirements, (grant,)))
+        for history in candidate.histories
+    )
+    return replace(candidate, histories=histories)
+
+
 def _coverage(candidate):
     variant = candidate.language_variants[0]
+    targets = [
+        {"target_type": "context_fact", "target_id": "fixture", "segment_ids": ["n1"]},
+        {"target_type": "action_field", "target_id": "price", "segment_ids": ["n1"]},
+    ]
+    targets.extend(
+        {
+            "target_type": "initial_requirement",
+            "target_id": requirement.constraint_id,
+            "segment_ids": ["n1"],
+        }
+        for requirement in candidate.histories[0].initial_state.requirements
+    )
+    targets.extend(
+        {"target_type": "initial_permission", "target_id": grant.grant_id, "segment_ids": ["n1"]}
+        for grant in candidate.histories[0].initial_state.grants
+    )
+    targets.extend(
+        {"target_type": "event", "target_id": event.event_id, "segment_ids": ["n2"]}
+        for event in candidate.histories[0].events
+    )
     return {
         "schema_version": "p2a-coverage-1",
         "scenario_id": candidate.scenario_id,
@@ -37,16 +74,7 @@ def _coverage(candidate):
         "variants": {
             variant.derivative_id: {
                 "human_validation_status": "not_started",
-                "targets": [
-                    {"target_type": "context_fact", "target_id": "fixture", "segment_ids": ["n1"]},
-                    {"target_type": "action_field", "target_id": "price", "segment_ids": ["n1"]},
-                    {"target_type": "initial_requirement", "target_id": "budget", "segment_ids": ["n1"]},
-                    {
-                        "target_type": "event",
-                        "target_id": candidate.histories[0].events[0].event_id,
-                        "segment_ids": ["n2"],
-                    },
-                ],
+                "targets": targets,
             }
         },
     }
@@ -124,8 +152,101 @@ def test_semantic_coverage_rejects_initial_requirement_mapped_only_to_literal():
     )
     requirement["segment_ids"] = ["initial-budget-literal"]
 
-    with pytest.raises(PreflightValidationError, match="mapped only to invariant literals"):
+    with pytest.raises(PreflightValidationError, match="requires non-whitespace localized natural-language text"):
         validate_semantic_coverage(candidate, coverage)
+
+
+@pytest.mark.parametrize("target_type", ["initial_requirement", "initial_permission", "event"])
+def test_semantic_coverage_rejects_required_target_linked_to_empty_natural_language(target_type):
+    candidate = _scenario_with_initial_permission() if target_type == "initial_permission" else _scenario_with_one_synthetic_variant()
+    variant = candidate.language_variants[0]
+    target_id = {
+        "initial_requirement": "budget",
+        "initial_permission": "synthetic-grant",
+        "event": candidate.histories[0].events[0].event_id,
+    }[target_type]
+    segment_id = "n2" if target_type == "event" else "n1"
+    updated_turns = tuple(
+        replace(
+            turn,
+            segments=tuple(
+                replace(segment, text="") if segment.segment_id == segment_id else segment
+                for segment in turn.segments
+            ),
+        )
+        for turn in variant.turns
+    )
+    candidate = with_language_variants(candidate, (replace(variant, turns=updated_turns),))
+    coverage = _coverage(candidate)
+    row = next(
+        target
+        for target in coverage["variants"][variant.derivative_id]["targets"]
+        if target["target_type"] == target_type and target["target_id"] == target_id
+    )
+    row["segment_ids"] = [segment_id]
+
+    with pytest.raises(PreflightValidationError, match="non-whitespace localized natural-language text"):
+        validate_semantic_coverage(candidate, coverage)
+
+
+def test_semantic_coverage_rejects_whitespace_only_natural_language_for_requirement():
+    candidate = _scenario_with_one_synthetic_variant()
+    variant = candidate.language_variants[0]
+    updated_turns = tuple(
+        replace(
+            turn,
+            segments=tuple(
+                replace(segment, text=" \t\n ") if segment.segment_id == "n1" else segment
+                for segment in turn.segments
+            ),
+        )
+        for turn in variant.turns
+    )
+    candidate = with_language_variants(candidate, (replace(variant, turns=updated_turns),))
+
+    with pytest.raises(PreflightValidationError, match="non-whitespace localized natural-language text"):
+        validate_semantic_coverage(candidate, _coverage(candidate))
+
+
+def test_semantic_coverage_rejects_empty_natural_language_even_with_an_invariant_literal():
+    candidate = _scenario_with_initial_literal()
+    variant = candidate.language_variants[0]
+    updated_turns = tuple(
+        replace(
+            turn,
+            segments=tuple(
+                replace(segment, text="") if segment.segment_id == "n1" else segment
+                for segment in turn.segments
+            ),
+        )
+        for turn in variant.turns
+    )
+    candidate = with_language_variants(candidate, (replace(variant, turns=updated_turns),))
+    coverage = _coverage(candidate)
+    requirement = next(
+        target
+        for target in coverage["variants"][variant.derivative_id]["targets"]
+        if target["target_type"] == "initial_requirement"
+    )
+    requirement["segment_ids"] = ["initial-budget-literal", "n1"]
+
+    with pytest.raises(PreflightValidationError, match="non-whitespace localized natural-language text"):
+        validate_semantic_coverage(candidate, coverage)
+
+
+def test_semantic_coverage_accepts_meaningful_natural_language_with_technical_literal():
+    candidate = _scenario_with_initial_literal()
+    coverage = _coverage(candidate)
+    requirement = next(
+        target
+        for target in coverage["variants"][candidate.language_variants[0].derivative_id]["targets"]
+        if target["target_type"] == "initial_requirement"
+    )
+    requirement["segment_ids"] = ["n1", "initial-budget-literal"]
+
+    audit = validate_semantic_coverage(candidate, coverage)
+
+    assert audit.mapped_target_count == 4
 
 
 def test_reviewer_packets_include_formal_spec_but_exclude_labels_and_judge_predictions(tmp_path):
@@ -257,5 +378,7 @@ def test_redacted_preflight_report_omits_item_ids_hashes_and_reference_details()
     assert "private-recipe-id" not in report
     assert "private-item-id" not in report
     assert "f" * 64 not in report
-    assert "16 valid and 16 invalid" in report
+    assert "16 valid" not in report
+    assert "16 invalid" not in report
+    assert "oracle labels" not in report
     assert "not independently validated" in report

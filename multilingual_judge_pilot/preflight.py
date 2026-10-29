@@ -182,10 +182,11 @@ def validate_semantic_coverage(
     scenario: CanonicalScenario,
     coverage_document: dict,
 ) -> SemanticCoverageAudit:
-    """Check that every formal target maps to localized spans in its required user turn.
+    """Check that every formal target maps to spans in its required user turn.
 
     This is a deterministic alignment check only. It deliberately does not
-    assign semantic correctness or human-validation status.
+    assign semantic correctness or human-validation status. Decision-relevant
+    requirements and events must include non-whitespace localized text.
     """
     if coverage_document.get("schema_version") != "p2a-coverage-1":
         raise PreflightValidationError("unsupported semantic-coverage schema version")
@@ -247,9 +248,12 @@ def validate_semantic_coverage(
                     raise PreflightValidationError(f"{key[0]}:{key[1]} must map to user turn {required_turn}")
                 selected.append(segment)
             if key[0] in {"initial_requirement", "initial_permission", "event"} and not any(
-                segment.kind is TextSegmentKind.LOCALIZED_NATURAL_LANGUAGE for segment in selected
+                segment.kind is TextSegmentKind.LOCALIZED_NATURAL_LANGUAGE and segment.text.strip()
+                for segment in selected
             ):
-                raise PreflightValidationError(f"{key[0]}:{key[1]} is mapped only to invariant literals, not natural language")
+                raise PreflightValidationError(
+                    f"{key[0]}:{key[1]} requires non-whitespace localized natural-language text"
+                )
             mapped_count += 1
 
     return SemanticCoverageAudit(scenario.scenario_id, len(scenario.language_variants), mapped_count)
@@ -633,13 +637,13 @@ def render_redacted_preflight_report(result: PrototypePreflight) -> str:
 - Four canonical scenarios × two histories × four language conditions per history = {result.language_variant_count} history-language variants and {result.item_count} development-only items.
 - Prototype domain-transition cells:
 {cells}
-- Aggregate deterministic oracle labels: {result.label_counts.get('valid', 0)} valid and {result.label_counts.get('invalid', 0)} invalid items. No per-scenario labels or reference records are included in this report.
+- Deterministic counterfactual validation passed for each pair. Reference validity labels and oracle outputs are omitted from this public report.
 - Structural semantic-coverage map: {result.semantic_coverage_target_count} formal targets are linked to judge-visible spans in the expected user turns. Initial requirements, grants, and decisive events include localized natural-language spans; this link check does not verify meaning.
 
 ## Deterministic validation
 
 - P1 typed schema, counterfactual oracle, language-condition coverage, and action chronology checks passed for all four records.
-- Each pair has the same structured action and oracle-established opposite labels.
+- Counterfactual pair-integrity checks passed for all four scenarios; pair-level verdicts are not reported.
 - Exact duplicate groups: {result.exact_duplicate_group_count}; normalized text duplicate groups: {result.normalized_duplicate_group_count}. Semantic near-duplicates were not machine-verified.
 - Recorded template IDs: {template_total} distinct with {template_reuse} repeated assignments; recipe IDs: {recipe_total} distinct with {recipe_reuse} repeated assignments. IDs are provisional, semantic/template-family overlap has not been independently audited, and development-only data cannot establish cross-partition separation.
 
@@ -651,11 +655,11 @@ The preflight demonstrates that P1's bounded schema and oracle can support the f
 
 All English and MSA conversations are Codex-authored, machine-assisted drafts marked **not independently validated**. No bilingual reviewer annotations or adjudications exist. Two independent qualified bilingual reviewers must review every variant against the formal specification without access to judge predictions; substantive corrections require re-review and a new content hash.
 
-A local editorial check identified and corrected one MSA wording issue in the booking numerical-revision draft (refundable versus cancellable wording and the duration phrase). The prior record and hashes are retained in the ignored revision history. This correction is still unvalidated by bilingual reviewers; whether other drafts need correction remains unknown until independent review.
+A local editorial check identified and corrected one MSA wording issue. The prior record and hashes are retained in the ignored revision history. This correction is still unvalidated by bilingual reviewers; whether other drafts need correction remains unknown until independent review.
 
 ## Remaining surface-feature risks
 
-Four scenarios are insufficient to establish that labels are not predictable from surface features. The permission-revocation prototype necessarily contains explicit consent withdrawal on its invalid side; numeric and temporal boundary values also determine validity by design. Explicit confirmations, negation, event direction, length, turn count, magnitude, time expressions, and critical-information position require a pre-freeze, human-coded audit across the full planned dataset. Do not force unnatural wording or claim statistical balance from this preflight.
+Four scenarios are insufficient to establish that labels are not predictable from surface features. Permission wording, numeric and temporal boundary values, explicit confirmations, negation, event direction, length, turn count, magnitude, time expressions, and critical-information position may correlate with validity by design. These properties require a pre-freeze, human-coded audit across the full planned dataset. Do not force unnatural wording or claim statistical balance from this preflight.
 
 ## Data handling
 
