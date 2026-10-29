@@ -275,7 +275,10 @@ def judge_facing_to_dict(item: JudgeFacingItem) -> dict:
             "tool_name": tool_schema.tool_name,
             "version": tool_schema.version,
             "description": tool_schema.description,
-            "parameters": [{"name": param.name, "type": param.value_type} for param in tool_schema.parameters],
+            "parameters": [
+                {"name": param.name, "type": param.value_type, "required": param.required}
+                for param in tool_schema.parameters
+            ],
             "irreversible": tool_schema.irreversible,
             "required_permissions": [
                 {

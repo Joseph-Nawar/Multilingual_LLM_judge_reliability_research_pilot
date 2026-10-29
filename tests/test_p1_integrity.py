@@ -132,7 +132,7 @@ def test_exact_scenario_duplicates_ignore_identifiers_but_compare_content():
     first = numerical_revision_pair(scenario_id="source-a")
     second = numerical_revision_pair(scenario_id="source-b")
     different = numerical_revision_pair(scenario_id="source-c")
-    different_action = replace(different, action=replace(different.action, fields=()))
+    different_action = replace(different, action=action("76"))
 
     audit = audit_duplicates((first, second, different_action))
     assert len(audit.exact_duplicate_groups) == 1
@@ -299,7 +299,10 @@ def test_parent_scenario_derivation_cannot_cross_partition():
 def test_duplicate_event_identifiers_and_unresolved_revision_targets_are_rejected():
     s = numerical_revision_pair()
     duplicate_event = replace(s.histories[1].events[0], event_id=s.histories[0].events[0].event_id)
-    histories = (s.histories[0], replace(s.histories[1], events=(duplicate_event,)))
+    histories = (
+        s.histories[0],
+        replace(s.histories[1], events=(duplicate_event,), decisive_event_ids=(duplicate_event.event_id,)),
+    )
     with pytest.raises(DuplicateIdentifierError, match="event ID"):
         validate_scenario(replace(s, histories=histories))
 
@@ -320,6 +323,6 @@ def test_language_assignment_enforces_condition_and_fixed_english_instruction():
         bad.validate_turn_languages({0: Language.ENGLISH, 2: Language.MSA})
 
 
-def test_public_currency_code_shape_rejects_non_iso_format():
-    with pytest.raises(SchemaValidationError, match="three-letter uppercase"):
+def test_public_currency_code_registry_rejects_unknown_codes():
+    with pytest.raises(SchemaValidationError, match="fixed .* ISO 4217 snapshot"):
         Money(Decimal("2.00"), "usd")

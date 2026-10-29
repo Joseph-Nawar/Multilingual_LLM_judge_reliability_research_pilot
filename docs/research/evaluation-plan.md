@@ -10,6 +10,8 @@ The primary consequential-change set retains 48 canonical scenarios, two opposit
 
 The primary comparison is the four condition-specific accuracy and class-specific performance estimates, with scenario-clustered uncertainty. Keep all four conditions visible; do not reduce the primary comparison to a single pooled score. The equally weighted cross-language versus same-language error contrast is exploratory, as are directional or family/domain contrasts. It does not by itself identify the causal effect of consequential revision.
 
+Each ordinary judge input must contain only conversation turns preceding the action decision point, the canonical structured action, public tool/schema information, fixed English judge instructions, and an opaque item ID. The structural validator links formal event turns to user turns and rejects post-action user/tool information; it cannot establish whether English or MSA text faithfully expresses those formal events. The public tool schema's required-parameter flags must match the rules enforced when validating the canonical action.
+
 The separate no-change control has 12 additional canonical scenarios and 96 items. It estimates language-condition behavior when a later turn restates an existing requirement without changing its effective meaning. Report its four condition estimates and any cross-language versus same-language error contrast separately as secondary exploratory results. A matched primary-versus-control contrast may be reported only as exploratory, with matched-set and template dependence retained. The small control does not fully identify a causal effect of constraint revision and never replaces the primary four-condition comparison.
 
 ## Candidate mandatory ordinary-condition baselines

@@ -20,6 +20,8 @@ def test_malformed_candidate_is_preserved_in_rejection_ledger_with_hash_and_sour
     assert outcome.ledger_entry.disposition is ValidationDisposition.REJECTED
     assert outcome.ledger_entry.payload_sha256 == sha256(raw_candidate.encode("utf-8")).hexdigest()
     assert outcome.ledger_entry.source_reference == "test-fixture://malformed-1"
+    assert outcome.ledger_entry.validator_version == "1.1"
+    assert outcome.ledger_entry.validator_version == "1.1"
     assert outcome.ledger_entry.error_codes
     assert outcome.ledger_entry.message
 

@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from enum import Enum
 import hashlib
 
-from .schema import CanonicalScenario, SchemaValidationError
+from .schema import CanonicalScenario, SCHEMA_VERSION, SchemaValidationError
 from .serialization import scenario_from_json
 
 
@@ -55,7 +55,7 @@ def audit_scenario_json(
             candidate_id=candidate_id,
             source_reference=source_reference,
             payload_sha256=payload_hash,
-            validator_version="1.0",
+            validator_version=SCHEMA_VERSION,
             disposition=ValidationDisposition.REJECTED,
             error_codes=(type(error).__name__,),
             message=str(error),
@@ -66,7 +66,7 @@ def audit_scenario_json(
         candidate_id=candidate_id,
         source_reference=source_reference,
         payload_sha256=payload_hash,
-        validator_version="1.0",
+        validator_version=SCHEMA_VERSION,
         disposition=ValidationDisposition.ACCEPTED,
         error_codes=(),
         message="canonical scenario passed deterministic schema and pair validation",

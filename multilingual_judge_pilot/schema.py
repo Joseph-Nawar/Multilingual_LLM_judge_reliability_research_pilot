@@ -11,8 +11,10 @@ import json
 import re
 from typing import TypeAlias
 
+from .iso4217_snapshot import CURRENCY_REGISTRY_VERSION, SUPPORTED_CURRENCY_CODES
 
-SCHEMA_VERSION = "1.0"
+
+SCHEMA_VERSION = "1.1"
 
 
 class SchemaValidationError(ValueError):
@@ -233,8 +235,10 @@ class NumericConstraint:
         if type(self.version) is not int or self.version < 1:
             raise SchemaValidationError("constraint version must be positive")
         _validate_interval(self.minimum, self.maximum)
-        if self.currency_code is not None and (not isinstance(self.currency_code, str) or not re.fullmatch(r"[A-Z]{3}", self.currency_code)):
-            raise SchemaValidationError("currency code must have three-letter uppercase ISO 4217 shape")
+        if self.currency_code is not None and self.currency_code not in SUPPORTED_CURRENCY_CODES:
+            raise SchemaValidationError(
+                f"currency code is absent from fixed {CURRENCY_REGISTRY_VERSION} ISO 4217 snapshot: {self.currency_code}"
+            )
 
 
 @dataclass(frozen=True)
@@ -400,6 +404,8 @@ class CounterfactualHistory:
     initial_state: HistoryState
     events: tuple[ConstraintEventType, ...]
     action_turn_index: int
+    decisive_turn_index: int
+    decisive_event_ids: tuple[str, ...]
     declared_label: ValidityLabel | None = None
 
     def __post_init__(self) -> None:
@@ -421,6 +427,13 @@ class CounterfactualHistory:
             raise SchemaValidationError("history contains an unsupported constraint event")
         if type(self.action_turn_index) is not int or self.action_turn_index < 1:
             raise SchemaValidationError("action turn index must be positive")
+        if type(self.decisive_turn_index) is not int or self.decisive_turn_index < 1:
+            raise SchemaValidationError("decisive turn index must be positive")
+        _tuple(self.decisive_event_ids, "decisive event IDs")
+        if any(not isinstance(event_id, str) or not event_id.strip() for event_id in self.decisive_event_ids):
+            raise SchemaValidationError("decisive event IDs must be non-empty strings")
+        if len(self.decisive_event_ids) != len(set(self.decisive_event_ids)):
+            raise SchemaValidationError("decisive event IDs must be unique")
         if self.declared_label is not None and not isinstance(self.declared_label, ValidityLabel):
             raise SchemaValidationError("declared validity must use a supported label")
 
@@ -432,8 +445,10 @@ class Money:
 
     def __post_init__(self) -> None:
         _finite_decimal(self.amount, "monetary amount")
-        if not isinstance(self.currency_code, str) or not re.fullmatch(r"[A-Z]{3}", self.currency_code):
-            raise SchemaValidationError("currency code must have three-letter uppercase ISO 4217 shape")
+        if not isinstance(self.currency_code, str) or self.currency_code not in SUPPORTED_CURRENCY_CODES:
+            raise SchemaValidationError(
+                f"currency code is absent from fixed {CURRENCY_REGISTRY_VERSION} ISO 4217 snapshot: {self.currency_code}"
+            )
 
 
 ActionValue: TypeAlias = str | bool | int | Decimal | datetime | Money
@@ -513,11 +528,14 @@ class ActionContract:
 class ToolParameterSchema:
     name: str
     value_type: str
+    required: bool = True
 
     def __post_init__(self) -> None:
         _nonempty(self.name, "tool parameter name")
         if self.value_type not in {"string", "boolean", "integer", "number", "money", "datetime"}:
             raise SchemaValidationError("unsupported public tool parameter type")
+        if not isinstance(self.required, bool):
+            raise SchemaValidationError("tool parameter required status must be boolean")
 
 
 @dataclass(frozen=True)
@@ -835,12 +853,22 @@ class CanonicalScenario:
             raise SchemaValidationError("action contract and public tool schema disagree on irreversibility")
         if self.public_tool_schema.required_permissions != self.action_contract.required_permissions:
             raise SchemaValidationError("action contract and public tool schema disagree on permissions")
-        public_parameters = {parameter.name: parameter.value_type for parameter in self.public_tool_schema.parameters}
+        public_parameters = {parameter.name: parameter for parameter in self.public_tool_schema.parameters}
+        action_fields = {field.name: field for field in self.action.fields}
+        missing_required = sorted(
+            parameter.name
+            for parameter in self.public_tool_schema.parameters
+            if parameter.required and parameter.name not in action_fields
+        )
+        if missing_required:
+            raise SchemaValidationError(
+                f"action is missing required public tool parameter(s): {', '.join(missing_required)}"
+            )
         for field in self.action.fields:
-            expected_type = public_parameters.get(field.name)
-            if expected_type is None:
+            parameter = public_parameters.get(field.name)
+            if parameter is None:
                 raise SchemaValidationError(f"action parameter is absent from the public tool schema: {field.name}")
-            if not _action_value_matches_tool_type(field.value, expected_type):
+            if not _action_value_matches_tool_type(field.value, parameter.value_type):
                 raise SchemaValidationError(f"action parameter type disagrees with the public tool schema: {field.name}")
 
 

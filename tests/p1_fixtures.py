@@ -30,6 +30,7 @@ from multilingual_judge_pilot.schema import (
     ReviseRequirement,
     ScenarioProvenance,
     Scope,
+    SCHEMA_VERSION,
     TextSegment,
     TextSegmentKind,
     TransitionFamily,
@@ -80,7 +81,15 @@ def history(
     scenario_id: str = "scenario-1",
     pair_id: str | None = None,
     action_turn_index: int = 4,
+    decisive_turn_index: int | None = None,
+    decisive_event_ids: tuple[str, ...] | None = None,
 ) -> CounterfactualHistory:
+    inferred_decisive_turn = decisive_turn_index
+    if inferred_decisive_turn is None:
+        inferred_decisive_turn = events[-1].turn_index if events else 2
+    inferred_decisive_ids = decisive_event_ids
+    if inferred_decisive_ids is None:
+        inferred_decisive_ids = tuple(event.event_id for event in events if event.turn_index == inferred_decisive_turn)
     return CounterfactualHistory(
         history_id=history_id,
         parent_scenario_id=scenario_id,
@@ -88,6 +97,8 @@ def history(
         initial_state=initial_state,
         events=events,
         action_turn_index=action_turn_index,
+        decisive_turn_index=inferred_decisive_turn,
+        decisive_event_ids=inferred_decisive_ids,
         declared_label=label,
     )
 
@@ -137,6 +148,8 @@ def scenario(
             initial_state=h.initial_state,
             events=h.events,
             action_turn_index=h.action_turn_index,
+            decisive_turn_index=h.decisive_turn_index,
+            decisive_event_ids=h.decisive_event_ids,
             declared_label=h.declared_label,
         )
         for h in histories
@@ -152,7 +165,7 @@ def scenario(
         derivative_ids=ids,
     )
     return CanonicalScenario(
-        schema_version="1.0",
+        schema_version=SCHEMA_VERSION,
         scenario_id=scenario_id,
         kind=kind,
         domain=Domain.BOOKING,

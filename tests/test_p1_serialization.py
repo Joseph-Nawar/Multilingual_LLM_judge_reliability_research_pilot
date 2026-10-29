@@ -45,7 +45,7 @@ def test_versioned_scenario_json_round_trips_and_is_byte_deterministic():
     decoded = scenario_from_json(encoded)
 
     assert decoded == s
-    assert json.loads(encoded)["schema_version"] == "1.0"
+    assert json.loads(encoded)["schema_version"] == "1.1"
     assert scenario_to_json(decoded) == encoded
 
 
@@ -54,6 +54,14 @@ def test_scenario_parser_rejects_unknown_fields_instead_of_ignoring_them():
     payload["oracle_verdict"] = "valid"
 
     with pytest.raises(SchemaValidationError, match="unknown field"):
+        scenario_from_json(json.dumps(payload))
+
+
+def test_scenario_parser_rejects_schema_10_without_implicit_migration():
+    payload = json.loads(scenario_to_json(numerical_revision_pair()))
+    payload["schema_version"] = "1.0"
+
+    with pytest.raises(SchemaValidationError, match="unsupported schema version"):
         scenario_from_json(json.dumps(payload))
 
 

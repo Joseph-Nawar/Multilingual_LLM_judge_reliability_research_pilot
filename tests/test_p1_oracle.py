@@ -102,7 +102,12 @@ def test_permission_revocation_counterfactual_pair_has_opposite_oracle_labels():
         scenario_id="revoke-pair",
         events=(RevokePermission("pair-revocation", 2, 0, "pair-grant"),),
     )
-    retained = history("revoke-pair-valid", initial, scenario_id="revoke-pair")
+    retained = history(
+        "revoke-pair-valid",
+        initial,
+        scenario_id="revoke-pair",
+        events=(RestatePermission("pair-preservation", 2, 0, "pair-grant", permission),),
+    )
     s = scenario(
         (revoked, retained),
         scenario_id="revoke-pair",
@@ -387,9 +392,11 @@ def test_permission_restatement_is_audited_as_an_exact_no_op():
 
 def test_control_that_restates_a_different_value_is_rejected():
     s = no_change_control()
+    secret_change = RestateRequirement("secret-change", 2, 0, "budget", budget("80"))
     bad_history = replace(
         s.histories[0],
-        events=(RestateRequirement("secret-change", 2, 0, "budget", budget("80")),),
+        events=(secret_change,),
+        decisive_event_ids=(secret_change.event_id,),
     )
     bad = replace(s, histories=(bad_history, s.histories[1]))
 
@@ -406,7 +413,7 @@ def test_no_change_control_rejects_a_hidden_permission_change():
         "secret-grant",
         PermissionKey("cancel_booking", Scope.entity("booking-1")),
     )
-    bad_history = replace(s.histories[0], events=(hidden_change,))
+    bad_history = replace(s.histories[0], events=(hidden_change,), decisive_event_ids=(hidden_change.event_id,))
 
     with pytest.raises(SchemaValidationError, match="cannot contain state-changing events"):
         validate_scenario(replace(s, histories=(bad_history, s.histories[1])))
@@ -429,10 +436,9 @@ def test_incorrect_supplied_counterfactual_label_is_rejected_by_oracle():
 def test_missing_action_parameter_is_explicit_error():
     s = numerical_revision_pair()
     bad_action = action(fields=())
-    malformed = replace(s, action=bad_action)
 
-    with pytest.raises(SchemaValidationError, match="missing for active requirement"):
-        evaluate_history(malformed, malformed.histories[0].history_id)
+    with pytest.raises(SchemaValidationError, match="missing required public tool parameter"):
+        replace(s, action=bad_action)
 
 
 def test_action_value_type_must_match_public_tool_schema():

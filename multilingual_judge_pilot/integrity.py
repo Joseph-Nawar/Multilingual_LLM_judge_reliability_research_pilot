@@ -3,18 +3,20 @@
 from __future__ import annotations
 
 from collections import Counter, defaultdict
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
+from datetime import datetime, timezone
 import hashlib
 import json
 import unicodedata
 import re
 
-from .oracle import evaluate_history
+from .oracle import apply_history_events, evaluate_history
 from .schema import (
     CanonicalScenario,
     ConstraintEventOrderError,
     DatasetKind,
     Domain,
+    EffectiveState,
     GrantPermission,
     IntroduceRequirement,
     LanguageCondition,
@@ -26,6 +28,7 @@ from .schema import (
     PartitionAssignment,
     PartitionSubject,
     PermissionGrant,
+    PermissionKey,
     ReasonCode,
     Requirement,
     RestatePermission,
@@ -79,18 +82,111 @@ class DuplicateAudit:
     semantic_equivalence_was_assessed: bool = False
 
 
-def _history_events_have_family(scenario: CanonicalScenario) -> bool:
-    events = tuple(event for history in scenario.histories for event in history.events)
-    family = scenario.transition_family
-    if family is TransitionFamily.INTRODUCTION:
-        return any(isinstance(event, IntroduceRequirement) for event in events)
-    if family is TransitionFamily.NUMERICAL_REVISION:
-        return any(isinstance(event, ReviseRequirement) and isinstance(event.replacement, NumericConstraint) for event in events)
-    if family is TransitionFamily.PERMISSION_REVOCATION:
-        return any(isinstance(event, RevokePermission) for event in events)
-    if family is TransitionFamily.TEMPORAL_REVISION:
-        return any(isinstance(event, ReviseRequirement) and isinstance(event.replacement, TemporalConstraint) for event in events)
-    return False
+def _bound_signature(bound) -> tuple | None:
+    if bound is None:
+        return None
+    value = bound.value
+    if isinstance(value, datetime):
+        value = value.astimezone(timezone.utc).isoformat(timespec="microseconds")
+    else:
+        value = str(value)
+    return value, bound.inclusive
+
+
+def _requirement_identity(requirement: Requirement) -> tuple:
+    """Identity of a requirement, excluding IDs, versions, and bound values."""
+    return type(requirement).__name__, requirement.scope.entity_id or "", requirement.field, getattr(requirement, "currency_code", None) or ""
+
+
+def _requirement_signature(requirement: Requirement) -> tuple:
+    if isinstance(requirement, NumericConstraint):
+        values = (_bound_signature(requirement.minimum), _bound_signature(requirement.maximum), requirement.currency_code or "")
+    elif isinstance(requirement, TemporalConstraint):
+        values = (_bound_signature(requirement.earliest), _bound_signature(requirement.latest))
+    else:
+        raise SchemaValidationError(f"unsupported formal requirement: {type(requirement).__name__}")
+    return (*_requirement_identity(requirement), *values)
+
+
+def _permission_signature(key: PermissionKey) -> tuple[str, str]:
+    return key.permission, key.scope.entity_id or ""
+
+
+def _active_state_signature(state: EffectiveState) -> tuple:
+    requirements = tuple(sorted((_requirement_signature(row) for row in state.active_requirements), key=repr))
+    grants = tuple(sorted((_permission_signature(row.key) for row in state.active_grants), key=repr))
+    return requirements, grants
+
+
+def _initial_state_signature(history) -> tuple:
+    requirements = tuple(sorted((_requirement_signature(row) for row in history.initial_state.requirements), key=repr))
+    grants = tuple(sorted((_permission_signature(row.key) for row in history.initial_state.grants), key=repr))
+    return requirements, grants
+
+
+def _decision_and_unrelated_signatures(state: EffectiveState, scenario: CanonicalScenario) -> tuple[tuple, tuple]:
+    action_fields = {row.name for row in scenario.action.fields}
+    required_permissions = set(scenario.action_contract.required_permissions)
+    relevant_requirements = []
+    unrelated_requirements = []
+    for requirement in state.active_requirements:
+        relevant = requirement.field in action_fields and requirement.scope.applies_to(scenario.action.entity_id)
+        (relevant_requirements if relevant else unrelated_requirements).append(_requirement_signature(requirement))
+    active_keys = {grant.key for grant in state.active_grants}
+    decision_permissions = tuple(
+        sorted((_permission_signature(key), key in active_keys) for key in required_permissions)
+    )
+    unrelated_grants = tuple(
+        sorted((_permission_signature(grant.key) for grant in state.active_grants if grant.key not in required_permissions), key=repr)
+    )
+    decision = (
+        tuple(sorted(relevant_requirements, key=repr)),
+        decision_permissions,
+    )
+    unrelated = (
+        tuple(sorted(unrelated_requirements, key=repr)),
+        unrelated_grants,
+    )
+    return decision, unrelated
+
+
+def _transition_signature(transition) -> tuple:
+    event = transition.event
+    return (
+        event.turn_index,
+        event.event_index,
+        type(event).__name__,
+        _active_state_signature(transition.before_state),
+        _active_state_signature(transition.after_state),
+    )
+
+
+def _event_subject_signature(transition) -> tuple:
+    event = transition.event
+    if isinstance(event, IntroduceRequirement):
+        return ("requirement", _requirement_identity(event.requirement))
+    if isinstance(event, ReviseRequirement):
+        current = next((row for row in transition.before_state.active_requirements if row.constraint_id == event.constraint_id), None)
+        if current is None:
+            raise SchemaValidationError("decisive revision has no active target in its pre-event state")
+        return ("requirement", _requirement_identity(current))
+    if isinstance(event, RestateRequirement):
+        return ("requirement", _requirement_identity(event.asserted_requirement))
+    if isinstance(event, GrantPermission):
+        return ("permission", _permission_signature(event.key))
+    if isinstance(event, RestatePermission):
+        return ("permission", _permission_signature(event.asserted_key))
+    if isinstance(event, RevokePermission):
+        current = next((row for row in transition.before_state.active_grants if row.grant_id == event.grant_id), None)
+        if current is None:
+            raise SchemaValidationError("decisive revocation has no active grant in its pre-event state")
+        return ("permission", _permission_signature(current.key))
+    raise SchemaValidationError(f"unsupported decisive event type: {type(event).__name__}")
+
+
+def _decisive_transitions(history, application):
+    decisive_ids = set(history.decisive_event_ids)
+    return tuple(transition for transition in application.transitions if transition.event.event_id in decisive_ids)
 
 
 def _initial_state_digest(history) -> str:
@@ -115,6 +211,15 @@ def _validate_scenario_structure(scenario: CanonicalScenario) -> tuple:
             raise ProvenanceError("history parent does not match its canonical scenario")
         if len(history.events) != len({event.event_id for event in history.events}):
             raise DuplicateIdentifierError("event ID is duplicated within a history")
+        if history.decisive_turn_index >= history.action_turn_index:
+            raise SchemaValidationError("decisive conversation turn must precede the action decision point")
+        event_ids_at_decisive_turn = {event.event_id for event in history.events if event.turn_index == history.decisive_turn_index}
+        if not history.decisive_event_ids or set(history.decisive_event_ids) != event_ids_at_decisive_turn:
+            raise SchemaValidationError("decisive event IDs must identify exactly the formal event group on the decisive turn")
+        if any(event.turn_index > history.decisive_turn_index for event in history.events):
+            raise SchemaValidationError("formal constraint events cannot occur after the decisive turn")
+        if any(event.turn_index >= history.action_turn_index for event in history.events):
+            raise ConstraintEventOrderError("formal constraint events must precede the action decision point")
     event_ids = [event.event_id for history in scenario.histories for event in history.events]
     history_ids = [history.history_id for history in scenario.histories]
     pair_ids = [history.pair_id for history in scenario.histories]
@@ -144,6 +249,25 @@ def _validate_scenario_structure(scenario: CanonicalScenario) -> tuple:
             len(turn.segments) for turn in variant.turns
         ):
             raise DuplicateIdentifierError("text segment ID is duplicated in a language derivative")
+        history = next(row for row in scenario.histories if row.history_id == variant.parent_history_id)
+        if variant.assignment.decisive_turn_index != history.decisive_turn_index:
+            raise SchemaValidationError("language variant decisive turn does not match the formal decisive event turn")
+        turns_by_index = {turn.turn_index: turn for turn in variant.turns}
+        post_action_turns = sorted(
+            turn.turn_index
+            for turn in variant.turns
+            if turn.turn_index >= history.action_turn_index and turn.role.value in {"user", "tool"}
+        )
+        if post_action_turns:
+            raise SchemaValidationError(
+                f"judge-facing conversation contains information after the action decision point: {post_action_turns}"
+            )
+        for event in history.events:
+            event_turn = turns_by_index.get(event.turn_index)
+            if event_turn is None or event_turn.role.value != "user":
+                raise SchemaValidationError(
+                    f"formal event turn {event.turn_index} requires a corresponding user conversation turn"
+                )
     expected_derivatives = set(valid_histories) | set(variant_ids)
     if set(scenario.provenance.derivative_ids) != expected_derivatives:
         raise ProvenanceError("scenario derivative provenance must list all history and language derivative IDs exactly")
@@ -162,7 +286,114 @@ def _validate_scenario_structure(scenario: CanonicalScenario) -> tuple:
         previous = literal_signatures.setdefault(variant.parent_history_id, signature)
         if previous != signature:
             raise SchemaValidationError("invariant literal names, order, and text must match across language variants")
+    if scenario.kind is DatasetKind.PRIMARY:
+        left_history, right_history = scenario.histories
+        if left_history.decisive_turn_index != right_history.decisive_turn_index:
+            raise SchemaValidationError("primary pair histories must share the decisive turn")
+        variants_by_history: dict[str, dict[object, LanguageVariant]] = defaultdict(dict)
+        for variant in variants:
+            variants_by_history[variant.parent_history_id][variant.assignment.condition] = variant
+        left_variants = variants_by_history[left_history.history_id]
+        right_variants = variants_by_history[right_history.history_id]
+
+        def nondecisive_conversation_signature(variant: LanguageVariant) -> tuple:
+            return tuple(
+                (
+                    turn.turn_index,
+                    turn.role.value,
+                    turn.language.value,
+                    tuple((segment.kind.value, segment.literal_name, segment.text) for segment in turn.segments),
+                )
+                for turn in variant.turns
+                if turn.turn_index != left_history.decisive_turn_index
+            )
+
+        for condition in sorted(left_variants.keys() & right_variants.keys(), key=lambda row: row.value):
+            if nondecisive_conversation_signature(left_variants[condition]) != nondecisive_conversation_signature(
+                right_variants[condition]
+            ):
+                raise SchemaValidationError(
+                    "primary pair non-decisive conversation context must be structurally identical within a language condition"
+                )
     return tuple(evaluate_history(scenario, history.history_id) for history in scenario.histories)
+
+
+def _validate_primary_causal_pair(scenario: CanonicalScenario, results: tuple) -> None:
+    first, second = scenario.histories
+    if first.action_turn_index != second.action_turn_index or first.decisive_turn_index != second.decisive_turn_index:
+        raise SchemaValidationError("counterfactual histories must share the decisive turn and action decision point")
+    if _initial_state_signature(first) != _initial_state_signature(second):
+        raise SchemaValidationError("primary histories must begin from semantically equivalent initial states")
+
+    applications = tuple(apply_history_events(history) for history in scenario.histories)
+    groups = tuple(_decisive_transitions(history, application) for history, application in zip(scenario.histories, applications, strict=True))
+    if any(not group for group in groups):
+        raise SchemaValidationError("each primary history requires an explicitly identified decisive event group")
+    group_orders = tuple(tuple(row.event.event_index for row in group) for group in groups)
+    if group_orders[0] != group_orders[1]:
+        raise SchemaValidationError("counterfactual decisive event groups must have compatible event ordering")
+    decisive_subjects = tuple(tuple(_event_subject_signature(row) for row in group) for group in groups)
+    if decisive_subjects[0] != decisive_subjects[1]:
+        raise SchemaValidationError("counterfactual decisive events must target semantically equivalent requirements or permissions")
+
+    prefixes = tuple(
+        replace(history, events=tuple(event for event in history.events if event.turn_index < history.decisive_turn_index), decisive_event_ids=())
+        for history in scenario.histories
+    )
+    prefix_applications = tuple(apply_history_events(history) for history in prefixes)
+    prefix_scenario = replace(scenario, histories=prefixes)
+    prefix_labels = tuple(evaluate_history(prefix_scenario, history.history_id).label for history in prefixes)
+    if prefix_labels[0] is not prefix_labels[1]:
+        raise SchemaValidationError("validity labels must agree before the decisive transition")
+
+    nondecisive = tuple(
+        tuple(_transition_signature(row) for row in application.transitions if row.event.event_id not in set(history.decisive_event_ids))
+        for history, application in zip(scenario.histories, applications, strict=True)
+    )
+    if nondecisive[0] != nondecisive[1]:
+        raise SchemaValidationError("non-decisive formal events and state transitions must be semantically equivalent")
+
+    prefix_signatures = tuple(_active_state_signature(application.effective_state) for application in prefix_applications)
+    if prefix_signatures[0] != prefix_signatures[1]:
+        raise SchemaValidationError("histories must have equivalent active decision-relevant state before the decisive change")
+
+    family = scenario.transition_family
+    event_groups = tuple(tuple(row.event for row in group) for group in groups)
+    if family is TransitionFamily.INTRODUCTION:
+        if any(not all(isinstance(event, IntroduceRequirement) for event in group) for group in event_groups):
+            raise SchemaValidationError("introduction pair decisive groups must contain only requirement introductions")
+    elif family is TransitionFamily.NUMERICAL_REVISION:
+        if any(not group or not all(isinstance(event, ReviseRequirement) and isinstance(event.replacement, NumericConstraint) for event in group) for group in event_groups):
+            raise SchemaValidationError("numerical-revision pair decisive groups must revise numeric requirements")
+    elif family is TransitionFamily.TEMPORAL_REVISION:
+        if any(not group or not all(isinstance(event, ReviseRequirement) and isinstance(event.replacement, TemporalConstraint) for event in group) for group in event_groups):
+            raise SchemaValidationError("temporal-revision pair decisive groups must revise temporal requirements")
+    elif family is TransitionFamily.PERMISSION_REVOCATION:
+        revoke_sides = [index for index, group in enumerate(event_groups) if any(isinstance(event, RevokePermission) for event in group)]
+        if len(revoke_sides) != 1:
+            raise SchemaValidationError("permission-revocation pair requires one revoking history and one preserving history")
+        preserve_side = 1 - revoke_sides[0]
+        if not all(isinstance(event, (RevokePermission, RestatePermission)) for group in event_groups for event in group):
+            raise SchemaValidationError("permission-revocation decisive groups may only revoke or explicitly restate permission")
+        if not any(isinstance(event, RestatePermission) for event in event_groups[preserve_side]):
+            raise SchemaValidationError("permission-preserving history requires an explicit permission restatement")
+    else:
+        raise SchemaValidationError("primary scenario has an unsupported transition family")
+
+    pre_decision = tuple(_decision_and_unrelated_signatures(app.effective_state, scenario)[0] for app in prefix_applications)
+    final_components = tuple(_decision_and_unrelated_signatures(result.effective_state, scenario) for result in results)
+    if family is not TransitionFamily.PERMISSION_REVOCATION:
+        if any(pre_decision[index] == final_components[index][0] for index in range(2)):
+            raise SchemaValidationError("decisive transition must make a meaningful active-state change relevant to the action")
+    else:
+        revoke_side = next(index for index, group in enumerate(event_groups) if any(isinstance(event, RevokePermission) for event in group))
+        if pre_decision[revoke_side] == final_components[revoke_side][0]:
+            raise SchemaValidationError("permission revocation must change active decision-relevant authorization")
+
+    if final_components[0][0] == final_components[1][0]:
+        raise SchemaValidationError("decisive transition must produce different active decision-relevant states")
+    if final_components[0][1] != final_components[1][1]:
+        raise SchemaValidationError("unrelated active-state differences cannot explain the counterfactual label contrast")
 
 
 def validate_counterfactual_pair(scenario: CanonicalScenario) -> PairValidation:
@@ -178,18 +409,24 @@ def validate_counterfactual_pair(scenario: CanonicalScenario) -> PairValidation:
                 f"declared label disagrees with deterministic oracle for history {history.history_id}"
             )
 
+    if scenario.histories[0].action_turn_index != scenario.histories[1].action_turn_index:
+        raise SchemaValidationError("counterfactual histories must share the same action decision point")
+    if scenario.histories[0].decisive_turn_index != scenario.histories[1].decisive_turn_index:
+        raise SchemaValidationError("counterfactual histories must share the same decisive turn")
+
     if scenario.kind is DatasetKind.PRIMARY:
-        if not _history_events_have_family(scenario):
-            raise SchemaValidationError("primary pair lacks an event for its consequential transition family")
-        if results[0].state_digest == results[1].state_digest:
-            raise SchemaValidationError("primary counterfactual histories must have different effective states")
+        _validate_primary_causal_pair(scenario, results)
     else:
         if any(not history.events for history in scenario.histories):
             raise SchemaValidationError("each no-change control history requires a later restatement")
         for history, result in zip(scenario.histories, results, strict=True):
             if not all(isinstance(event, (RestateRequirement, RestatePermission)) for event in history.events):
                 raise SchemaValidationError("no-change controls cannot contain state-changing events")
-            if not result.event_audit or any(step.before_digest != step.after_digest for step in result.event_audit):
+            application = apply_history_events(history)
+            if not application.transitions or any(
+                _active_state_signature(step.before_state) != _active_state_signature(step.after_state)
+                for step in application.transitions
+            ):
                 raise SchemaValidationError("no-change restatement changed effective state")
             if min(event.turn_index for event in history.events) <= 0:
                 raise SchemaValidationError("control restatement must occur after the initial context")

@@ -13,6 +13,7 @@ from .schema import (
     CounterfactualHistory,
     EffectiveState,
     EventAudit,
+    ConstraintEventType,
     GrantPermission,
     HistoryState,
     IntroduceRequirement,
@@ -37,6 +38,14 @@ from .schema import (
 class StateApplication:
     effective_state: EffectiveState
     event_audit: tuple[EventAudit, ...]
+    transitions: tuple["AppliedEvent", ...]
+
+
+@dataclass(frozen=True)
+class AppliedEvent:
+    event: ConstraintEventType
+    before_state: EffectiveState
+    after_state: EffectiveState
 
 
 def _state(
@@ -65,6 +74,7 @@ def apply_history_events(history: CounterfactualHistory) -> StateApplication:
     seen_grant_ids = set(grants)
     seen_event_ids: set[str] = set()
     event_audit: list[EventAudit] = []
+    transitions: list[AppliedEvent] = []
     previous_order = (0, -1)
 
     for event in history.events:
@@ -137,8 +147,9 @@ def apply_history_events(history: CounterfactualHistory) -> StateApplication:
 
         after = _state(active, grants, revoked, superseded)
         event_audit.append(EventAudit(event.event_id, before.digest, after.digest))
+        transitions.append(AppliedEvent(event, before, after))
 
-    return StateApplication(_state(active, grants, revoked, superseded), tuple(event_audit))
+    return StateApplication(_state(active, grants, revoked, superseded), tuple(event_audit), tuple(transitions))
 
 
 def _decimal_value(value: ActionValue, requirement: NumericConstraint) -> tuple[Decimal, str | None]:
