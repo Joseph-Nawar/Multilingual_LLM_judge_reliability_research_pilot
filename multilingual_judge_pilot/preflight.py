@@ -66,6 +66,7 @@ class AnnotationAudit:
     complete: bool
     raw_semantic_agreement: float | None
     cohen_kappa: float | None
+    historical_dependence_agreement: float | None
     linguistic_quality_agreement: float | None
     issue_code_exact_agreement: float | None
     checklist_item_agreement: dict[str, float]
@@ -107,6 +108,7 @@ _COVERAGE_TARGET_TYPES = {
 }
 _ANNOTATION_RELATIONS = {"equivalent", "meaning_changed", "ambiguous"}
 _LINGUISTIC_QUALITIES = {"natural", "acceptable_variation", "unnatural_or_unclear"}
+_DECISIVE_TURN_SUFFICIENCY = {"yes", "no", "unclear"}
 _ANNOTATION_ISSUES = {
     "incorrect_number",
     "incorrect_time",
@@ -137,9 +139,12 @@ _FORBIDDEN_ANNOTATION_FIELDS = {
 _ANNOTATION_REQUIRED_FIELDS = {
     "example_id",
     "example_sha256",
+    "canonical_scenario_sha256",
     "reviewer_id",
     "semantic_relation",
     "linguistic_quality",
+    "decisive_turn_sufficiency",
+    "historical_dependence_rationale",
     "issue_codes",
     "checklist",
     "notes",
@@ -151,6 +156,11 @@ _HEX_SHA256 = re.compile(r"^[0-9a-f]{64}$")
 def variant_sha256(variant: object) -> str:
     """Hash the typed variant record with P1's deterministic canonical encoding."""
     return hashlib.sha256(stable_json(variant).encode("utf-8")).hexdigest()
+
+
+def canonical_scenario_sha256(scenario: CanonicalScenario) -> str:
+    """Hash the formal scenario record reviewed alongside each language variant."""
+    return hashlib.sha256(stable_json(scenario).encode("utf-8")).hexdigest()
 
 
 def _expected_coverage_targets(scenario: CanonicalScenario, history) -> dict[tuple[str, str], int]:
@@ -295,7 +305,7 @@ def export_reviewer_packets(
     scenarios: Iterable[CanonicalScenario],
     output_root: Path,
     *,
-    reviewer_ids: tuple[str, str] = ("reviewer_1", "reviewer_2"),
+    reviewer_ids: tuple[str, str] = ("reviewer_slot_1", "reviewer_slot_2"),
     coverage_documents: dict[str, dict] | None = None,
 ) -> tuple[Path, ...]:
     """Write two independent local review packets per scenario, without labels."""
@@ -318,7 +328,7 @@ def export_reviewer_packets(
                 "condition": variant.assignment.condition.value,
                 "example_sha256": variant_sha256(variant),
                 "draft_status": "machine_assisted_unvalidated",
-                "human_validation_status": "not_started",
+                "human_validation_status": "fresh_independent_review_required",
                 "turns": [
                     {
                         "turn_index": turn.turn_index,
@@ -337,13 +347,14 @@ def export_reviewer_packets(
             directory = output_root / reviewer_id
             directory.mkdir(parents=True, exist_ok=True)
             packet = {
-                "packet_version": "p2a-review-1",
-                "reviewer_id": reviewer_id,
+                "packet_version": "p2b1-review-2",
+                "reviewer_slot": reviewer_id,
                 "scenario_id": scenario.scenario_id,
-                "instruction": "Review independently. Do not view or discuss model-judge predictions. Draft language is machine-assisted and not human validated.",
+                "instruction": "Review independently. Do not view or discuss model-judge predictions. Explicit oracle verdicts and gold-label fields are omitted. This is machine-assisted draft language and is not independently validated.",
                 "canonical_spec": _formal_review_spec(scenario),
+                "canonical_scenario_sha256": canonical_scenario_sha256(scenario),
                 "language_variants": variants,
-                "annotations": "Submit one independent annotation per derivative using the P2A rubric.",
+                "annotation_template_file": "annotation-template.jsonl",
             }
             path = directory / f"{scenario.scenario_id}.json"
             path.write_text(json.dumps(packet, ensure_ascii=False, sort_keys=True, indent=2) + "\n", encoding="utf-8")
@@ -351,7 +362,11 @@ def export_reviewer_packets(
     return tuple(written)
 
 
-def _validate_annotation_record(record: dict, expected_hashes: dict[str, str]) -> None:
+def _validate_annotation_record(
+    record: dict,
+    expected_hashes: dict[str, str],
+    expected_scenario_hashes: dict[str, str],
+) -> None:
     if not isinstance(record, dict):
         raise PreflightValidationError("annotation record must be a JSON object")
     forbidden = _FORBIDDEN_ANNOTATION_FIELDS & set(record)
@@ -362,12 +377,20 @@ def _validate_annotation_record(record: dict, expected_hashes: dict[str, str]) -
     example_id = record["example_id"]
     if example_id not in expected_hashes or record["example_sha256"] != expected_hashes[example_id]:
         raise PreflightValidationError("annotation references an unknown or changed example hash")
+    if example_id not in expected_scenario_hashes or record["canonical_scenario_sha256"] != expected_scenario_hashes[example_id]:
+        raise PreflightValidationError("annotation canonical_scenario_sha256 does not match the reviewed formal scenario")
     if not isinstance(record["reviewer_id"], str) or not record["reviewer_id"].strip():
         raise PreflightValidationError("annotation reviewer ID is required")
     if record["semantic_relation"] not in _ANNOTATION_RELATIONS:
         raise PreflightValidationError("annotation semantic_relation is invalid")
     if record["linguistic_quality"] not in _LINGUISTIC_QUALITIES:
         raise PreflightValidationError("annotation linguistic_quality is invalid")
+    if record["decisive_turn_sufficiency"] not in _DECISIVE_TURN_SUFFICIENCY:
+        raise PreflightValidationError("annotation decisive_turn_sufficiency is invalid")
+    if not isinstance(record["historical_dependence_rationale"], str) or not record[
+        "historical_dependence_rationale"
+    ].strip():
+        raise PreflightValidationError("annotation historical_dependence_rationale is required")
     issues = record["issue_codes"]
     if not isinstance(issues, list) or len(issues) != len(set(issues)) or not set(issues) <= _ANNOTATION_ISSUES:
         raise PreflightValidationError("annotation issue_codes are invalid")
@@ -380,12 +403,16 @@ def _validate_annotation_record(record: dict, expected_hashes: dict[str, str]) -
         raise PreflightValidationError("annotation notes must be text")
 
 
-def summarize_annotations(records: Iterable[dict], expected_hashes: dict[str, str]) -> AnnotationAudit:
+def summarize_annotations(
+    records: Iterable[dict],
+    expected_hashes: dict[str, str],
+    expected_scenario_hashes: dict[str, str],
+) -> AnnotationAudit:
     """Validate independent annotation rows and summarize completeness/agreement."""
     by_example: dict[str, dict[str, dict]] = defaultdict(dict)
     reviewer_ids: set[str] = set()
     for record in records:
-        _validate_annotation_record(record, expected_hashes)
+        _validate_annotation_record(record, expected_hashes, expected_scenario_hashes)
         example_id, reviewer_id = record["example_id"], record["reviewer_id"]
         if reviewer_id in by_example[example_id]:
             raise PreflightValidationError(f"duplicate annotation by reviewer {reviewer_id} for {example_id}")
@@ -395,6 +422,7 @@ def summarize_annotations(records: Iterable[dict], expected_hashes: dict[str, st
     complete = len(reviewer_ids) == 2 and all(set(by_example.get(example_id, {})) == reviewer_ids for example_id in expected_hashes)
     agreement: float | None = None
     kappa: float | None = None
+    history_sufficiency_agreement: float | None = None
     linguistic_agreement: float | None = None
     issue_agreement: float | None = None
     checklist_agreement: dict[str, float] = {}
@@ -416,6 +444,10 @@ def summarize_annotations(records: Iterable[dict], expected_hashes: dict[str, st
             for category in categories
         )
         kappa = (observed - expected) / (1 - expected) if expected < 1 else None
+        history_sufficiency_agreement = sum(
+            left["decisive_turn_sufficiency"] == right["decisive_turn_sufficiency"]
+            for left, right in rows
+        ) / len(rows)
         linguistic_agreement = sum(
             left["linguistic_quality"] == right["linguistic_quality"] for left, right in rows
         ) / len(rows)
@@ -433,6 +465,7 @@ def summarize_annotations(records: Iterable[dict], expected_hashes: dict[str, st
         complete=complete,
         raw_semantic_agreement=agreement,
         cohen_kappa=kappa,
+        historical_dependence_agreement=history_sufficiency_agreement,
         linguistic_quality_agreement=linguistic_agreement,
         issue_code_exact_agreement=issue_agreement,
         checklist_item_agreement=checklist_agreement,
@@ -503,6 +536,10 @@ _PRIVATE_PATH_PROBES = (
     ".research-data/p2a/review-packets/reviewer_1/_ignore_probe.json",
     ".research-data/p2a/annotations/annotations.jsonl",
     ".research-data/p2a/adjudications/adjudications.jsonl",
+    ".research-data/p2b-1/revisions/prototype.json",
+    ".research-data/p2b-1/review-packets/reviewer_slot_1/prototype.json",
+    ".research-data/p2b-1/annotations/reviewer_slot_1.jsonl",
+    ".research-data/p2b-1/review-materials/bilingual-side-by-side.md",
 )
 _PRIVATE_TRACKED_PREFIXES = (".research-data/", "data/private/", "data/locked/", "data/reference/")
 
@@ -627,7 +664,7 @@ def render_redacted_preflight_report(result: PrototypePreflight) -> str:
     recipe_total = len(result.recipe_counts)
     template_reuse = sum(max(0, count - 1) for count in result.template_counts.values())
     recipe_reuse = sum(max(0, count - 1) for count in result.recipe_counts.values())
-    return f"""# P2A development-only preflight report
+    return f"""# P2A/P2B-1 development-only preflight report
 
 **Status:** Deterministic preflight complete; independent bilingual validation has not been performed.
 
@@ -649,21 +686,23 @@ def render_redacted_preflight_report(result: PrototypePreflight) -> str:
 
 ## Feasibility assessment
 
-The preflight demonstrates that P1's bounded schema and oracle can support the formal structures, condition coverage, chronology, and provenance checks needed for these four development prototypes. It does not establish full-study authoring throughput, human-review capacity, naturalness, or semantic equivalence; those remain owner-review and P2B/P2C questions.
+The preflight demonstrates that P1's bounded schema and oracle can support the formal structures, condition coverage, chronology, and provenance checks needed for these four development prototypes. It does not establish full-study authoring throughput, human-review capacity, naturalness, or semantic equivalence; these remain owner-review and later-milestone questions.
+
+## P2B-1 draft-correction status
+
+The four existing drafts were revised after independent content-audit findings. Wording was clarified, one public tool description was aligned with its intended operation, and relative numerical and temporal revision forms were adopted to exercise earlier-state reconstruction. Formal effective constraints and counterfactual oracle relationships were preserved. These changes remain unvalidated natural-language drafts; the provisional complexity assessment is not a human annotation.
 
 ## Human review status
 
-All English and MSA conversations are Codex-authored, machine-assisted drafts marked **not independently validated**. No bilingual reviewer annotations or adjudications exist. Two independent qualified bilingual reviewers must review every variant against the formal specification without access to judge predictions; substantive corrections require re-review and a new content hash.
-
-A local editorial check identified and corrected one MSA wording issue. The prior record and hashes are retained in the ignored revision history. This correction is still unvalidated by bilingual reviewers; whether other drafts need correction remains unknown until independent review.
+All English and MSA conversations are Codex-authored, machine-assisted drafts marked **not independently validated**. Completed independent annotations: 0 of 64 expected; adjudications: 0. Two qualified bilingual reviewers must review every variant against the formal specification without access to judge predictions. Substantive corrections require re-review against new variant and canonical-scenario hashes. Reviewer slots and blank templates are preparation materials, not reviewer records.
 
 ## Remaining surface-feature risks
 
-Four scenarios are insufficient to establish that labels are not predictable from surface features. Permission wording, numeric and temporal boundary values, explicit confirmations, negation, event direction, length, turn count, magnitude, time expressions, and critical-information position may correlate with validity by design. These properties require a pre-freeze, human-coded audit across the full planned dataset. Do not force unnatural wording or claim statistical balance from this preflight.
+Four scenarios are insufficient to establish that labels are not predictable from surface features. Permission wording, numeric bound polarity and revision direction, values and action margins, earliest/latest temporal expressions, explicit confirmations, negation, length, turn count, magnitude, and critical-information position may correlate with validity by design. These properties require a pre-freeze, human-coded, label-association audit across the full planned dataset. Do not force unnatural wording or claim statistical balance from this preflight.
 
 ## Data handling
 
-Canonical records, translations, coverage maps, reference labels, review packets, annotations, and adjudications remain under ignored local `.research-data/` paths. Only this aggregate redacted report is public.
+Canonical records, translations, coverage maps, reference labels, prior versions, review packets, blank annotation templates, annotations, and adjudications remain under ignored local `.research-data/` paths. No locked examples, auxiliary-control examples, judge predictions, or model outputs were created. Only this aggregate redacted report is public.
 """
 
 
@@ -682,18 +721,18 @@ def _read_jsonl(path: Path) -> list[dict]:
 
 
 def _cli() -> int:
-    parser = argparse.ArgumentParser(description="P2A local prototype and bilingual-review utilities")
+    parser = argparse.ArgumentParser(description="Local prototype preflight and bilingual-review preparation utilities")
     subparsers = parser.add_subparsers(dest="command", required=True)
     validate_parser = subparsers.add_parser("validate", help="run deterministic checks and render a redacted report")
     validate_parser.add_argument("--development-root", type=Path, default=Path(".research-data/p2a/development"))
     validate_parser.add_argument("--output", type=Path, help="optional output path for the redacted aggregate report")
     packet_parser = subparsers.add_parser("review-packets", help="export local, label-free bilingual review packets")
     packet_parser.add_argument("--development-root", type=Path, default=Path(".research-data/p2a/development"))
-    packet_parser.add_argument("--output-root", type=Path, default=Path(".research-data/p2a/review-packets"))
+    packet_parser.add_argument("--output-root", type=Path, default=Path(".research-data/p2b-1/review-packets"))
     annotation_parser = subparsers.add_parser("audit-annotations", help="check local annotation and adjudication records")
     annotation_parser.add_argument("--development-root", type=Path, default=Path(".research-data/p2a/development"))
-    annotation_parser.add_argument("--annotations", type=Path, default=Path(".research-data/p2a/annotations/annotations.jsonl"))
-    annotation_parser.add_argument("--adjudications", type=Path, default=Path(".research-data/p2a/adjudications/adjudications.jsonl"))
+    annotation_parser.add_argument("--annotations", type=Path, default=Path(".research-data/p2b-1/annotations/annotations.jsonl"))
+    annotation_parser.add_argument("--adjudications", type=Path, default=Path(".research-data/p2b-1/adjudications/adjudications.jsonl"))
     subparsers.add_parser("isolation", help="verify private research-data ignore and tracked-file status")
     args = parser.parse_args()
 
@@ -729,8 +768,13 @@ def _cli() -> int:
         for scenario in scenarios
         for variant in scenario.language_variants
     }
+    expected_scenario_hashes = {
+        variant.derivative_id: canonical_scenario_sha256(scenario)
+        for scenario in scenarios
+        for variant in scenario.language_variants
+    }
     annotations = _read_jsonl(args.annotations)
-    audit = summarize_annotations(annotations, expected_hashes)
+    audit = summarize_annotations(annotations, expected_hashes, expected_scenario_hashes)
     adjudications = _read_jsonl(args.adjudications)
     grouped_annotations: dict[str, list[dict]] = defaultdict(list)
     for record in annotations:
@@ -750,6 +794,7 @@ def _cli() -> int:
         "missing_annotation_rows": max(0, 2 * len(expected_hashes) - len(annotations)),
         "semantic_relation_percent_agreement": audit.raw_semantic_agreement,
         "cohen_kappa": audit.cohen_kappa,
+        "decisive_turn_sufficiency_percent_agreement": audit.historical_dependence_agreement,
         "linguistic_quality_percent_agreement": audit.linguistic_quality_agreement,
         "issue_code_exact_percent_agreement": audit.issue_code_exact_agreement,
         "checklist_item_agreement": audit.checklist_item_agreement,

@@ -1,6 +1,6 @@
 # Dataset and canonical-state specification
 
-**Status:** research specification amended after the 2026-10-29 research-owner audit. P1 schema and oracle infrastructure passed independent review. P2A has exactly four local ignored development prototypes; no complete study dataset or generator is included.
+**Status:** research specification amended after the 2026-10-29 research-owner audit. P1 schema and oracle infrastructure passed independent review. P2A authoring feasibility is approved; P2B-1 corrects and prepares only the same four local development prototypes. No complete study dataset or generator is included.
 
 **Authoritative label source:** canonical task state plus the deterministic validity rule in `multilingual_judge_pilot/oracle.py`. LLM judgments and language drafts are not ground truth. P2A prototype oracle records remain local and unapproved as research data.
 
@@ -9,6 +9,10 @@
 - **Canonical scenario:** highest-level content and partition unit. It defines a domain, a requirement/state history, relevant entities, and one canonical action.
 - **Counterfactual history:** one of two histories for a scenario. Both retain identical action semantics; their initial/effective states yield opposite validity labels.
 - **Derived evaluation item:** one history rendered under one language condition and paired with the scenario's canonical action. A canonical scenario contributes 2 histories × 4 conditions = 8 items.
+
+### Judge-facing identifiers and internal mapping
+
+Each future judge-facing item receives a random UUID version 4 identifier at the reviewed dataset-freeze step. The identifier must be generated independently of validity, history position, transition family, domain, language condition, partition, and template/recipe metadata. It must not encode or hash any of those fields in a decodable or inferable way. Store the UUID-to-reference mapping only in the separate, access-controlled reference path; ordinary judge records contain only the opaque UUID. No study item IDs are created during P2B-1.
 
 | Set | Canonical scenarios | Histories | Items | Partition plan |
 | --- | ---: | ---: | ---: | --- |
@@ -22,7 +26,7 @@ The separate control adds 96 items. Each control language condition has 24 items
 
 ## Primary consequential-change scenarios
 
-The primary set covers booking, customer operations, and scheduling and the four transition families: introduction, numerical revision, permission revocation, and temporal revision. It retains the proposed 4-scenarios-per-domain/family-cell allocation. The current primary partition proposal assigns one scenario per cell to development and three to locked evaluation. Every counterfactual history, language variant, action rendering, and other derivative follows its canonical scenario's partition.
+The primary set covers booking, customer operations, and scheduling and the four transition families: introduction, numerical revision, permission revocation, and temporal revision. It retains the proposed 4-scenarios-per-domain/family-cell allocation. The current primary partition proposal assigns one scenario per cell to development and three to locked evaluation. Every counterfactual history, language variant, action rendering, and other derivative follows its canonical scenario's partition. The prospective blueprint additionally crosses complexity category with which history is valid, without changing the 48-scenario target or any label. The current four development examples keep their existing history order; future slot allocation must counterbalance position rather than use the same ordering convention.
 
 ## Auxiliary no-change linguistic controls
 

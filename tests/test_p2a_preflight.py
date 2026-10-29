@@ -10,6 +10,7 @@ from multilingual_judge_pilot.preflight import (
     PrototypePreflight,
     PreflightValidationError,
     append_jsonl_record,
+    canonical_scenario_sha256,
     export_reviewer_packets,
     render_redacted_preflight_report,
     summarize_annotations,
@@ -259,6 +260,7 @@ def test_reviewer_packets_include_formal_spec_but_exclude_labels_and_judge_predi
         packet = json.loads(path.read_text(encoding="utf-8"))
         assert packet["canonical_spec"]["initial_states"]
         assert packet["language_variants"][0]["example_sha256"] == variant_sha256(candidate.language_variants[0])
+        assert packet["canonical_scenario_sha256"] == canonical_scenario_sha256(candidate)
         serialized = json.dumps(packet, ensure_ascii=False)
         assert "declared_label" not in serialized
         assert "oracle_label" not in serialized
@@ -266,13 +268,16 @@ def test_reviewer_packets_include_formal_spec_but_exclude_labels_and_judge_predi
         assert "oracle_result" not in serialized
 
 
-def _annotation(example_id, example_hash, reviewer_id, relation="equivalent"):
+def _annotation(example_id, example_hash, reviewer_id, relation="equivalent", scenario_hash="c" * 64):
     return {
         "example_id": example_id,
         "example_sha256": example_hash,
+        "canonical_scenario_sha256": scenario_hash,
         "reviewer_id": reviewer_id,
         "semantic_relation": relation,
         "linguistic_quality": "natural",
+        "decisive_turn_sufficiency": "no",
+        "historical_dependence_rationale": "The earlier requirement is needed to interpret the relative revision.",
         "issue_codes": [],
         "checklist": {
             "matches_formal_spec": True,
@@ -290,21 +295,65 @@ def _annotation(example_id, example_hash, reviewer_id, relation="equivalent"):
 
 def test_annotation_summary_requires_two_independent_reviewers_and_reports_agreement():
     expected = {"item-1": "a" * 64, "item-2": "b" * 64}
+    expected_scenarios = {"item-1": "c" * 64, "item-2": "d" * 64}
     records = [
-        _annotation(item_id, digest, reviewer, relation)
+        _annotation(item_id, digest, reviewer, relation, expected_scenarios[item_id])
         for item_id, digest, relation in (("item-1", "a" * 64, "equivalent"), ("item-2", "b" * 64, "ambiguous"))
         for reviewer in ("reviewer_a", "reviewer_b")
     ]
 
-    summary = summarize_annotations(records, expected)
+    summary = summarize_annotations(records, expected, expected_scenarios)
 
     assert summary.complete is True
     assert summary.reviewer_count == 2
     assert summary.raw_semantic_agreement == 1.0
     assert summary.cohen_kappa == 1.0
+    assert summary.historical_dependence_agreement == 1.0
     assert summary.linguistic_quality_agreement == 1.0
     assert summary.issue_code_exact_agreement == 1.0
     assert summary.checklist_item_agreement["matches_formal_spec"] == 1.0
+
+
+def test_annotation_requires_a_historical_dependence_assessment_and_rationale():
+    expected = {"item-1": "a" * 64}
+    expected_scenarios = {"item-1": "c" * 64}
+    record = _annotation("item-1", "a" * 64, "reviewer_a")
+
+    del record["decisive_turn_sufficiency"]
+    with pytest.raises(PreflightValidationError, match="missing required fields"):
+        summarize_annotations([record], expected, expected_scenarios)
+
+    record = _annotation("item-1", "a" * 64, "reviewer_a")
+    record["decisive_turn_sufficiency"] = "maybe"
+    with pytest.raises(PreflightValidationError, match="decisive_turn_sufficiency is invalid"):
+        summarize_annotations([record], expected, expected_scenarios)
+
+    record = _annotation("item-1", "a" * 64, "reviewer_a")
+    record["historical_dependence_rationale"] = "   "
+    with pytest.raises(PreflightValidationError, match="historical_dependence_rationale is required"):
+        summarize_annotations([record], expected, expected_scenarios)
+
+
+def test_annotation_rejects_a_stale_canonical_scenario_hash():
+    record = _annotation("item-1", "a" * 64, "reviewer_a", scenario_hash="b" * 64)
+
+    with pytest.raises(PreflightValidationError, match="canonical_scenario_sha256 does not match"):
+        summarize_annotations([record], {"item-1": "a" * 64}, {"item-1": "c" * 64})
+
+
+def test_annotation_summary_reports_decisive_turn_sufficiency_agreement():
+    records = [
+        _annotation("item-1", "a" * 64, "reviewer_a"),
+        _annotation("item-1", "a" * 64, "reviewer_b"),
+    ]
+    records[0]["decisive_turn_sufficiency"] = "yes"
+    records[0]["historical_dependence_rationale"] = "The decisive instruction supplies the only changed requirement."
+    records[1]["decisive_turn_sufficiency"] = "no"
+    records[1]["historical_dependence_rationale"] = "The earlier constraint is needed to resolve the instruction."
+
+    summary = summarize_annotations(records, {"item-1": "a" * 64}, {"item-1": "c" * 64})
+
+    assert summary.historical_dependence_agreement == 0.0
 
 
 def test_annotation_summary_rejects_reference_labels_and_prediction_fields():
@@ -312,7 +361,7 @@ def test_annotation_summary_rejects_reference_labels_and_prediction_fields():
     record["judge_prediction"] = "valid"
 
     with pytest.raises(PreflightValidationError, match="prohibited annotation fields"):
-        summarize_annotations([record], {"item-1": "a" * 64})
+        summarize_annotations([record], {"item-1": "a" * 64}, {"item-1": "c" * 64})
 
 
 def test_adjudication_is_required_for_disagreements_and_must_reference_exact_hash():

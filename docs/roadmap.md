@@ -18,21 +18,29 @@ Progress stops after each milestone until an evidence-based review accepts the c
 
 **Gate:** The research owner approved P1 at commit `3139cebe6926edeca0997c965617c7a35c3e0d27`. That approval did not itself authorize later milestones; P2A was separately authorized.
 
-## P2A — Authoring protocol and controlled preflight (authorized; review pending)
+## P2A — Authoring protocol and controlled preflight (approved 2026-10-29)
 
 **Deliverables:** reproducible scenario-authoring procedure; balanced prospective 60-scenario blueprint; two-reviewer English/MSA annotation rubric and audit utilities; exactly four local primary development prototypes from four distinct domain/family cells (32 history-language variants); structural semantic-coverage links; redacted preflight report. Prototype text, language drafts, references, review packets, and annotations remain local under ignored `.research-data/` paths.
 
 **Acceptance evidence:** only four development-only primary prototypes exist locally; all have the approved schema and oracle labels, two histories, four conditions, chronology, and complete formal-target coverage links; every requirement, permission, and event target maps to at least one non-whitespace localized natural-language span; all pairs have oracle-established opposite labels; duplicate/template checks and local data-isolation tests pass. Coverage links are explicitly not human semantic validation. Translation drafts remain unvalidated. No controls or locked scenarios are authored; no dataset is frozen; no inference occurs.
 
-**Gate:** research owner independently reviews the authoring method, blueprint, four prototypes, coverage report, feasibility, and limitations. No P2B work follows automatically.
+**Gate:** the research owner accepted the framework and approved P2A feasibility. The four language drafts still required content inspection and independent bilingual validation; P2A approval did not approve those translations as validated. P2B-1 has a separate, narrower authorization.
 
-## P2B — Independent bilingual validation (not started; separate authorization required)
+## P2B-1 — Prototype corrections and human-review preparation (authorized)
 
-**Deliverables:** two independent qualified bilingual reviews of approved prototype drafts and later authorized study variants; hash-bound annotations; disagreement adjudication; retained corrections, exclusions, and revision history; semantic near-duplicate review and template-family audit.
+**Scope:** correct the four existing development prototypes in response to the independent content audit; preserve originals and hashes; update the prospective blueprint and annotation rubric; prepare hash-bound packets, blank templates, briefing, side-by-side presentation, and a completeness report. All private records remain ignored local data. This submilestone creates no additional scenarios, controls, locked examples, or judge results.
+
+**Acceptance evidence:** original bytes and hashes are preserved; each proposed change and rationale is in the revision ledger; revised formal records pass schema/oracle/counterfactual/chronology/coverage checks with all 32 language variants present; changed variants remain unvalidated. The blueprint addresses history-position counterbalancing, opaque IDs, reproducible order randomization, upper/lower and earliest/latest constraints, direction and surface-cue audit, and a directly specified/history-dependent distinction. Two reviewer slots have separate packets and blank dual-hash annotation templates, including the human historical-dependence question; the completeness report states actual human coverage, including zero if no reviewer has submitted records. Private-data isolation and redacted public reporting pass.
+
+**Gate:** the research owner reviews the corrected prototypes and review materials. No reviewer annotation is represented as complete until two qualified humans have independently submitted hash-matched records. P2B-1 does not authorize P2C or inference.
+
+## P2B — Independent bilingual validation (not started beyond P2B-1 preparation)
+
+**Deliverables:** two independent qualified bilingual reviews of approved prototype drafts and later separately authorized study variants; hash-bound annotations; disagreement adjudication; retained corrections, exclusions, and revision history; semantic near-duplicate review and template-family audit.
 
 **Acceptance evidence:** reviewers assess all decision-relevant meaning, initial requirements, decisive turns, actions, chronology, quantities, permissions, temporal expressions, and invariant literals without judge predictions or oracle verdicts. Agreement, missing reviews, disagreements, adjudications, and limitations are reported; substantive revisions receive full re-review. Codex-authored drafts are not human-approved by structural checks.
 
-**Gate:** owner accepts reviewer qualifications, coverage, adjudication, and language/template findings before any dataset-freeze milestone.
+**Gate:** owner accepts reviewer qualifications, coverage, adjudication, and language/template findings before any dataset-freeze milestone. Completing P2B-1 preparation alone is not P2B validation.
 
 ## P2C — Dataset authoring, partition freeze, and release review (not started; separate authorization required)
 

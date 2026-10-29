@@ -1,6 +1,6 @@
 # Scenario authoring protocol
 
-**Status:** P2A authoring procedure for research-owner review. It supports a four-scenario development preflight only; it does not authorize the locked dataset, controls, or dataset freeze.
+**Status:** P2A was approved as an authoring-feasibility milestone. P2B-1 authorizes corrections and human-review preparation for the existing four local development prototypes only. It does not authorize additional study scenarios, controls, locked examples, or dataset freeze.
 
 ## Purpose and selection independence
 
@@ -18,6 +18,8 @@ Before writing dialogue, register a canonical scenario concept, its domain/famil
 ## Counterfactual construction
 
 Primary histories start from semantically equivalent formal states and share the action, action decision point, decisive turn, domain facts, and non-decisive context. The formal event group is the only intended causal divergence. Both histories must have the same pre-decisive validity label; after the decisive event the P1 oracle must assign opposite labels to the identical action. Check both histories against the entire effective state, not a label assertion supplied by the author.
+
+Do not make the counterfactual history position a label cue. The four P2A prototypes currently use the same position convention; preserve their existing labels and ordering. For the full primary set, plan a cross-balanced allocation within each domain × transition-family cell: one directly specified and one history-dependent scenario with the valid history in position A, and one of each complexity with the valid history in position B. Select the 12 development slots so that the four complexity × valid-position combinations each occur three times; the remaining locked slots then contain nine scenarios per combination. If independent review changes a complexity classification, update the prospective allocation before any locked authoring and retain the prior plan and reason. Counterbalance the 12 auxiliary controls separately, with six scenarios per valid-history position; control matches do not transfer label position or partition. This allocation controls position at the scenario level and does not make the derived items independent.
 
 Use the approved family-specific forms:
 
@@ -38,11 +40,22 @@ For each language variant, maintain a semantic-coverage entry for every shared c
 
 English and MSA are separately authored drafts, not assumed translations of each other. Use the canonical specification as their shared meaning source. Keep entity IDs, tool names, structured action, currency codes, Western numerals, exact monetary values, dates, and times unchanged. Monetary amounts use exact Decimal values and ISO 4217 currency codes. Dates and times use unambiguous ISO 8601 forms with explicit offsets. Mark code-like identifiers and technical literals as invariant spans; localize surrounding user intent and constraint meaning rather than treating the structured action as a substitute for the user's words.
 
+### Scenario complexity and historical-state dependence
+
+Assign complexity from the information needed to determine the action's validity, not from turn count:
+
+- **Directly specified:** the decisive requirement and every other decision-relevant fact needed for validity can be determined from the decisive turn, action, and public tool contract alone.
+- **History-dependent:** earlier conversational information is necessary to retrieve an initial requirement, permission, or prior value and combine it with the decisive turn.
+
+Every bilingual reviewer answers: **“Can the action's validity be uniquely determined from the decisive turn, action, and public tool contract alone, or is earlier conversational information necessary?”** Record `yes`, `no`, or `unclear` and a rationale tied to the formal constraint and the visible turn(s). `yes` maps to directly specified; `no` maps to history-dependent; `unclear` remains unresolved. A relative change is not automatically history-dependent if the decisive turn supplies all needed operands; conversely, an explicit decisive value may still be history-dependent if another needed permission or requirement appears only earlier. The current four prototypes' provisional authoring assessment and rationale are kept out of reviewer packets so reviewers answer independently.
+
+For the 48 primary scenarios, the prospective target is 24 directly specified and 24 history-dependent scenarios, with two of each category per domain × transition-family cell. The development split targets six per category and the locked primary split targets 18 per category, subject to independent content review and allocation feasibility. This is a planned descriptive exploratory contrast, not a power claim or confirmatory comparison. Report the category separately and preserve the primary four-language-condition comparison. Controls remain separate and are not included in these counts.
+
 Natural wording takes precedence over matching token or character counts. Do not distort meaning to equalize length. Where a draft sounds unnatural, unclear, or overly technical, revise it before independent review and retain the old version and hash. Ambiguity or an unresolved domain assumption is a reason to revise or reject, not to infer intended meaning from the oracle label.
 
 ## Anti-shortcut review before freeze
 
-Before the full dataset is frozen, use a predeclared human-coded audit to compare validity labels with: negation; permission terms; direction of numeric revision; explicit confirmation; turn count; character and language-appropriate token length; numeric magnitude; temporal expressions; critical-information turn and span position; and formality/naturalness. Code surface features from the authored text without using judge outputs. Report feature-by-label tables by domain, transition family, and language condition; identify perfect or near-perfect trivial cues and revise candidates before locked evaluation or record the unresolved threat. Do not use significance tests on the pilot as a shortcut for balancing, and do not force unnatural phrasing or identical lengths. Every revision is revalidated and hashed.
+Before the full dataset is frozen, use a predeclared human-coded audit to compare validity labels with: negation; permission wording; direction of numeric revision; explicit confirmation; turn count; character and language-appropriate token length; numeric magnitude; upper versus lower numeric bounds; earliest versus latest temporal boundaries; temporal expressions; critical-information turn and span position; and formality/naturalness. Report label associations as counts and conditional proportions, retaining scenario and template dependence; do not treat language derivatives as independent observations. Cross-tab by domain, transition family, language condition, complexity category, and partition where cell sizes permit. Identify perfect or near-perfect trivial cues and revise candidates before locked evaluation or record the unresolved threat. Do not use significance tests on the pilot as a shortcut for balancing, and do not force unnatural phrasing or identical lengths. Every revision is revalidated and hashed.
 
 The four P2A prototypes are too few to establish surface-feature balance. Their preflight report records evident potential confounds only; it makes no population or predictive claim.
 
@@ -50,10 +63,10 @@ The four P2A prototypes are too few to establish surface-feature balance. Their 
 
 For each canonical record, preserve the scenario and derivative IDs, source/parent relationship, partition, semantic-recipe and template identifiers with versions, authoring method, initial formal state, event history, action contract, coverage map, language-variant hashes, validation status, revision chain, and exclusion reason. Each revision names changed fields, reason, prior content hash, new content hash, author, and date. Preserve unsuccessful and ambiguous candidates in an auditable rejection ledger; do not silently discard or replace them.
 
-All P2A language is Codex-authored, machine-assisted draft material, with no external model calls, and remains **not independently validated**. A frozen candidate requires two qualified bilingual reviewers following the [bilingual annotation protocol](bilingual-annotation-protocol.md), independent annotations, agreement reporting, and adjudication of disagreements. Reviewers may inspect the formal specification, but must not see model-judge predictions. A substantive edit invalidates prior review for the changed content hash and requires re-review. If a second qualified reviewer is unavailable, record that limitation and stop before declaring independent validation or dataset readiness.
+All current language remains Codex-authored, machine-assisted draft material and **not independently validated**. A review-ready candidate requires two qualified bilingual reviewers following the [bilingual annotation protocol](bilingual-annotation-protocol.md), independent annotations, agreement reporting, and adjudication of disagreements. Reviewers may inspect the formal specification, but must not see model-judge predictions. Bind each annotation to both the exact language-variant hash and canonical-scenario hash. A substantive edit invalidates prior review for the changed hashes and requires re-review. If a second qualified reviewer is unavailable, record that limitation and stop before declaring independent validation or dataset readiness.
 
 ## Data handling and authoring gate
 
-P2A canonical examples, translations, coverage records, oracle labels, reviewer packets, annotations, and adjudications remain under the ignored local `.research-data/p2a/` tree. Only schemas, utilities, procedures, synthetic tests, and approved redacted aggregate reports may be committed. Check both Git ignore behavior and the tracked-file index before release; ignore rules do not untrack an already committed file.
+P2A/P2B-1 canonical examples, translations, coverage records, oracle labels, revision snapshots, reviewer packets, annotations, and adjudications remain under ignored local `.research-data/` paths. Only schemas, utilities, procedures, synthetic tests, and approved redacted aggregate reports may be committed. Check both Git ignore behavior and the tracked-file index before release; ignore rules do not untrack an already committed file.
 
 Before any later authoring milestone, the research owner reviews this procedure, the blueprint, semantic visibility checks, template plan, surface-feature audit, and the P2A preflight report. Passing deterministic schema/oracle checks is necessary but does not establish bilingual semantic validity or authorize a locked evaluation.
