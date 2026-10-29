@@ -1,8 +1,8 @@
 # Dataset and canonical-state specification
 
-**Status:** conceptual P0 specification, amended after the 2026-10-29 research-owner audit. No dataset or generator is included.
+**Status:** research specification amended after the 2026-10-29 research-owner audit. P1 schema and oracle infrastructure is implemented; no study dataset or generator is included.
 
-**Authoritative label source:** canonical task state plus an executable validity rule, to be implemented and tested in P1.
+**Authoritative label source:** canonical task state plus the deterministic validity rule in `multilingual_judge_pilot/oracle.py`; P1 implementation is pending independent owner review.
 
 ## Study units and planned counts
 
@@ -13,12 +13,12 @@
 | Set | Canonical scenarios | Histories | Items | Partition plan |
 | --- | ---: | ---: | ---: | --- |
 | Primary consequential-change set | 48 | 96 | 384 | 12 development; 36 locked evaluation |
-| Auxiliary no-change linguistic control | 12 | 24 | 96 | 12 locked auxiliary scenarios; none in development, pending P1 approval |
+| Auxiliary no-change linguistic control | 12 | 24 | 96 | 12 locked auxiliary scenarios; none in development; locked allocation approved for P1 infrastructure |
 | **Total planned corpus** | **60** | **120** | **480** | **12 development primary; 48 locked total (36 primary + 12 control)** |
 
 The primary design remains unchanged: 3 domains × 4 consequential transition families, 48 scenarios, and 384 items. It yields 96 development items and 288 locked primary items. Each scenario-condition pair has one valid and one invalid item. Each primary language condition has 96 items (48 valid, 48 invalid); the development partition has 24 per condition (12/12), and the locked primary partition has 72 (36/36).
 
-The separate control adds 96 items. Each control language condition has 24 items (12 valid, 12 invalid). Under the current proposal, controls are locked and never used for development-time judge selection. Thus the combined locked evaluation inventory has 384 items (288 primary + 96 control), while the primary estimand continues to use only the 36 primary locked scenarios. The all-locked control allocation is a proposal that the research owner must approve in P1 before any control construction.
+The separate control adds 96 items. Each control language condition has 24 items (12 valid, 12 invalid). The research owner approved the all-locked auxiliary partition in the P1 authorization; controls remain unavailable for development-time judge selection. Thus the combined locked evaluation inventory has 384 items (288 primary + 96 control), while the primary estimand continues to use only the 36 primary locked scenarios. This authorization establishes a future partition target, not permission to construct the study controls during P1.
 
 ## Primary consequential-change scenarios
 
@@ -28,7 +28,7 @@ The primary set covers booking, customer operations, and scheduling and the four
 
 Each control history contains a later user turn that restates or confirms an already active requirement while leaving its effective meaning unchanged. For example, a booking history may begin with a maximum fare and later repeat that same maximum. The paired history begins with a different maximum and later repeats that different maximum. An identical action can then be valid under one initial requirement and invalid under the other. Opposite labels arise from the pair's different initial states; neither history contains an actual constraint revision. The oracle must verify state equality immediately before and after the restatement.
 
-Where feasible, match each control scenario to a locked primary scenario on domain, constraint type, the pair of final effective states, action complexity, and turn structure. Give the two records distinct canonical IDs and link them with a match-set ID. Preserve all control histories and variants together in the locked auxiliary partition. Record failed matches and their reasons; do not weaken the matching record after observing judge results.
+Where feasible, match each control scenario to a locked primary scenario on domain, constraint type, the pair of final effective states, action complexity, and turn structure. P1 match records preserve explicit dimensions and distinguish full, partial, and unmatched controls. Give the two records distinct canonical IDs and link them with a match-set ID. The P1 validator does not reassign either scenario or any derivative; it currently requires a matched control to link to a locked primary scenario. This matching restriction is an implementation proposal for owner review at the P1 gate. Preserve all control histories and variants together in the locked auxiliary partition. Record failed matches and their reasons; do not weaken the matching record after observing judge results.
 
 Control items must remain separately identifiable in storage, prompts/manifests, scoring, and reports. They support secondary exploratory comparisons of language switching under changed versus unchanged meaning. They do not enter the primary estimand, replace the four-condition primary comparison, or fully identify the causal effect of consequential revision.
 
@@ -44,7 +44,25 @@ Each canonical record should specify enough explicit information to derive the e
 - one canonical action and its parameters;
 - a deterministic valid/invalid rule and reason code.
 
-The rule must resolve active constraints, supersession, revocation, numerical bounds, and temporal conditions without an LLM. For each control restatement it must verify that the effective state is unchanged; for each counterfactual pair it must compute opposite labels for the same action. Booking and scheduling values must use unambiguous dates, times, and time zones. P1 will define the machine-readable schema and executable oracle; P0 defines their authority, not their implementation.
+The rule must resolve active constraints, supersession, revocation, numerical bounds, and temporal conditions without an LLM. For each control restatement it must verify that the effective state is unchanged; for each counterfactual pair it must compute opposite labels for the same action. Booking and scheduling values must use unambiguous dates, times, and time zones. The P1 implementation contract below makes the bounded machine-readable semantics explicit; it defines no natural-language interpretation.
+
+## P1 canonical schema and deterministic state contract
+
+The implementation uses schema version `1.0`, typed standard-library records, and strict JSON encoding. Unknown fields, missing required fields, implicit type coercions, unsupported value types, non-finite numeric values, and timezone-naive datetimes are validation errors. A parsed record must not be silently repaired. Canonical state, derived state, oracle output, and declared labels are reference-only. `RestateRequirement` and `RestatePermission` are explicit no-op events: each must exactly match an active formal requirement or permission grant.
+
+Constraint events are ordered lexicographically by `(turn_index, event_index)`; this order must be unique and strictly increasing, and every event must precede the action turn. A constraint introduction uses an identifier never used earlier in that history. A revision must target an active requirement and preserve its identifier, requirement type, scope, and action field; it advances the version and retains the prior version as superseded. It may not alter unrelated requirements. A restatement must exactly match the currently active formal requirement and leaves the state unchanged. Repeated introductions, revisions of inactive/unresolved requirements, duplicate/repeated revocations, contradictory restatements, and out-of-order events are errors.
+
+Permission authorization is explicit and scoped. Absence of an active grant means `NOT_GRANTED`; it never means permission. A revocation removes the active grant. Authorization after revocation requires a later explicit grant. The canonical action contract lists each required permission and scope. An irreversible action must declare at least one required permission; an omitted requirement is ambiguous and rejected. A grant satisfies only the exact permission-and-scope key.
+
+Numeric requirements use exact `Decimal` values. Each lower/upper numeric bound explicitly records inclusivity; equality passes an inclusive bound and fails an exclusive bound. If a monetary requirement is used, both requirement and action value include the same uppercase three-letter ISO 4217 code; schema validation checks the code shape, while official code membership remains a provenance/review check. Binary floating-point values are not accepted.
+
+Temporal requirements use optional lower and upper bounds, each with an explicit inclusive/exclusive flag. Date-time values must be ISO 8601 with a UTC offset (`Z` or signed offset); comparisons use the represented instant after UTC normalization. Naive local times, unresolved DST folds, invalid/empty intervals, and reversed bounds are rejected. The oracle uses the canonical action's explicit execution time and never reads the wall clock.
+
+The engine preserves unrelated active requirements and evaluates all applicable requirements whose global or entity scope matches the action. A required action field that is missing or has an incompatible type is a validation error, not an inferred pass. Every oracle result retains the effective state, deterministic reason codes, ordered event audit, and a content digest.
+
+## P1 language/action schema hooks
+
+The typed schema supports EN–EN, AR–AR, EN–AR, and AR–EN conditions; Arabic is tagged specifically as Modern Standard Arabic. It records initial/decisive user-turn indices, per-turn language, explicit approved overrides for other turns with a reason, fixed English judge-instruction language, and ordered text spans marked as localized natural language or invariant technical literals. A separate pre-freeze validation hook requires all four conditions for each history. Across available variants of a history, the validator requires literal names, order, and text to match exactly. Tool schema and structured action are stored once per canonical scenario and cannot vary by language condition. Stable entity IDs, ISO-shaped currency codes, exact monetary values, and offset-aware date-times are typed fields. These checks establish structure and representation only; they do not establish translation quality, semantic equivalence, bilingual validation, or a frozen dataset. P1 creates no study-language variants.
 
 ## Counterfactual pairing and language conditions
 
@@ -69,7 +87,7 @@ Keep literal technical spans byte-identical across language variants when they a
 
 Every record and derivative must retain, at minimum:
 
-- canonical scenario ID, source scenario ID, derivative/parent IDs, history-pair ID, language-variant ID, and condition;
+- canonical scenario ID, source scenario ID, derivative/parent IDs, history-pair ID, language-variant ID, and condition; P1 provenance enumerates all history and language-variant derivative IDs;
 - primary/control set membership, domain, transition or no-change family, match-set ID when applicable, and partition;
 - authoring template ID and semantic-recipe ID, including version;
 - construction/source method, oracle version, language/translation version, validation/adjudication status, revision history, and exclusion reason;

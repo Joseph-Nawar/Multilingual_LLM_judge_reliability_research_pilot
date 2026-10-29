@@ -2,7 +2,7 @@
 
 This repository establishes the research foundation for a controlled feasibility study of whether LLM judges correctly classify agent actions when validity depends on user constraints introduced, revised, or revoked across English and Arabic. The object of study is the **judge**; no task-performing agent is evaluated here.
 
-The hypotheses are provisional. The study is designed to allow null and negative results, and no inference or dataset generation is in scope at this stage.
+The hypotheses are provisional. The study is designed to allow null and negative results. P0 has been approved and P1 is authorized; this branch implements schema, oracle, and integrity infrastructure only.
 
 ## Exploratory pilot at a glance
 
@@ -15,10 +15,10 @@ The hypotheses are provisional. The study is designed to allow null and negative
 | Language conditions | 4: EN–EN, AR–AR, EN–AR, AR–EN |
 | Primary derived judge items | 384 |
 | Primary development / locked evaluation scenarios | 12 / 36 |
-| Separate no-change control scenarios / items | 12 / 96 (locked auxiliary set proposed) |
+| Separate no-change control scenarios / items | 12 / 96 (approved locked auxiliary set) |
 | Total planned scenarios / items | 60 / 480 |
 
-These are proposed counts, not a dataset currently present in the repository. Control results remain separate from the primary estimand. The control partition is pending P1 approval. See the research specifications before changing or implementing the design.
+These are approved future counts, not a dataset currently present in the repository. The 12 controls are assigned to a locked auxiliary partition; control results remain separate from the primary estimand. Their matching rules remain reviewable at the P1 gate. See the research specifications before changing or implementing the design.
 
 ## Research specifications
 
@@ -29,11 +29,11 @@ These are proposed counts, not a dataset currently present in the repository. Co
 - [Prior-work register](docs/research/prior-work.md)
 - [Milestone roadmap and acceptance gates](docs/roadmap.md)
 
-The research documents are authoritative. This README and `AGENTS.md` provide navigation and working guidance only. P0 establishes a reviewable foundation; the protocol is not frozen for execution, and the next milestone requires evidence-based review.
+The research documents are authoritative. This README and `AGENTS.md` provide navigation and working guidance only. P0 is approved; P1 implementation is for independent review and does not freeze the protocol or authorize P2.
 
 ## Development setup
 
-Requires Python 3.11+; no model-serving, data-science, or platform-specific dependency is needed for P0. The setup works on Apple Silicon macOS.
+Requires Python 3.11+; the P1 implementation uses the standard library at runtime and pytest for tests. The setup works on Apple Silicon macOS.
 
 ```bash
 python3 -m venv .venv
@@ -42,8 +42,8 @@ python -m pip install -e '.[dev]'
 python -m pytest
 ```
 
-The only development dependency is pytest. P0 contains no benchmark generator or model runner.
+The only development dependency is pytest. P1 contains typed schema, deterministic oracle, validation, and test-only synthetic fixtures. It contains no study dataset, translation generator, judge adapter, or model runner.
 
 ## Current boundary
 
-P0 is repository and research documentation only. Do not create benchmark examples, execute judge inference, or start P1 until the P0 review gate is recorded. No paid inference is authorized by this repository setup.
+P1 may include only synthetic test fixtures. Do not create the study benchmark, generate research-language variants, execute judge inference, or begin P2 until the P1 review gate is recorded. No paid inference is authorized by this repository setup.

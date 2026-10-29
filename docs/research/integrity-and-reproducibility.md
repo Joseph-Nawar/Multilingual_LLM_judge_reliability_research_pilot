@@ -2,6 +2,8 @@
 
 These requirements govern future dataset work and model evaluation. P0 creates no data and makes no model calls.
 
+P1 is authorized for schema, oracle, and integrity infrastructure only. Its fixtures must be small, synthetic, test-only, and independent of study scenarios; no translated research-language variants or locked benchmark records may be added to the public repository.
+
 ## Reference authority and separated access
 
 - Canonical task states and executable validity rules are the sole authority for reference labels. LLM output, rationales, consensus, or majority vote never define ground truth.
@@ -13,7 +15,7 @@ These requirements govern future dataset work and model evaluation. P0 creates n
 ## Dataset and counterfactual integrity
 
 - Preserve the 48-scenario primary consequential-change set (384 items; 12 development and 36 locked scenarios) separately from the 12-scenario no-change control (96 additional items). The control contains later restatements that leave effective meaning unchanged; its paired opposite labels arise from different initial active requirements, not an actual revision within either history.
-- Keep primary and control counts, labels, scoring, and results distinct. Under the current proposal, controls are all locked auxiliary scenarios; the research owner must approve that partition before P1 construction.
+- Keep primary and control counts, labels, scoring, and results distinct. The research owner approved all 12 controls as locked auxiliary scenarios in the P1 authorization; this does not authorize control construction during P1.
 - Preserve counterfactual links and assign every history, language variant, and derivative of a canonical scenario to one partition. Keep matched primary-control scenarios linked but separately identified.
 - Balance valid and invalid items within each condition and approved partition. Record domain, condition, set, match, and partition in the manifest.
 - Validate all four language conditions (EN–EN, AR–AR, EN–AR, AR–EN) independently for semantic equivalence, constraint scope, chronology, action meaning, and label preservation. Apply the approved MSA and invariant-literal policy.
@@ -22,6 +24,10 @@ These requirements govern future dataset work and model evaluation. P0 creates n
 ## Provenance, templates, duplicates, and partitions
 
 Every record and derivative must retain canonical/source/parent/derivative IDs; counterfactual, language, and match-set IDs; primary/control designation; domain, condition, and split; authoring-template ID; semantic-recipe ID and version; construction and translation method/version; oracle and validation status; invariant-literal spans; revisions; and exclusion reasons.
+
+Reject malformed records, unresolved references, duplicate identifiers, invalid action parameters, contradictory state transitions, incorrect supplied labels, and cross-partition derivatives with explicit errors. Preserve every invalid candidate and exclusion/revision reason in an auditable ledger; validation must not mutate or silently repair the input. The partition manifest is deterministic and records the explicit seed, strata, assignments, and content hash. Each derivative follows its canonical scenario's partition; a primary-control match link never reassigns either side.
+
+For public repositories, judge-facing serialization is an explicit allowlist containing only an opaque item ID, approved conversation turns, the structured action, and public tool/schema information. Reference states, verdicts, reasons, pairing keys, template/recipe metadata, and internal provenance are excluded. No actual locked labels, locked reference records, or unapproved experimental data may be committed before a separately reviewed release process. P1 adds ignore rules for reserved private, locked, and reference-data paths; future locked data must remain outside tracked source files unless an explicit release is reviewed.
 
 Before a dataset is frozen, run and document lexical and semantic near-duplicate detection, including method/version and adjudication. Inventory shared linguistic frames, constraint structures, values, and action patterns. Report how many genuinely distinct authoring templates and semantic recipes exist, their reuse distribution, near-duplicate rates, and template/recipe overlap across partitions. Where feasible, keep template families within one partition and preserve independent templates between development and locked evaluation. Record unavoidable cross-partition reuse as a leakage threat.
 
@@ -49,7 +55,7 @@ Before locked evaluation, version and hash the primary/control datasets, partiti
 
 ## Model calls and cost
 
-No model calls are permitted during P0. This repository grants no inference budget. Future paid inference requires explicit budget authorization. A future runner must preserve the prompt, raw response, model version, token use, and execution metadata for every attempt, including failures. Language-competence screening is a separate development-only qualification procedure, not a locked evaluation or task-accuracy result.
+No model calls are permitted during P0 or this P1 implementation. This repository grants no inference budget. Future paid inference requires explicit budget authorization. A future runner must preserve the prompt, raw response, model version, token use, and execution metadata for every attempt, including failures. Language-competence screening is a separate development-only qualification procedure, not a locked evaluation or task-accuracy result.
 
 ## Independent review and decision ownership
 
