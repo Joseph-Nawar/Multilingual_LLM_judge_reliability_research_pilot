@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 
+import multilingual_judge_pilot.preflight as preflight_module
 from multilingual_judge_pilot.preflight import (
     PrototypePreflight,
     PreflightValidationError,
@@ -258,7 +259,14 @@ def test_reviewer_packets_include_formal_spec_but_exclude_labels_and_judge_predi
     assert len(packet_paths) == 2
     for path in packet_paths:
         packet = json.loads(path.read_text(encoding="utf-8"))
-        assert packet["canonical_spec"]["initial_states"]
+        assert packet["packet_version"] == "p2b1-review-3"
+        assert packet["annotation_schema_version"] == "p2b1-annotation-2"
+        assert packet["adjudication_schema_version"] == "p2b1-adjudication-2"
+        histories = packet["canonical_spec"]["histories"]
+        assert len(histories) == 2
+        assert all(history["initial_state"] for history in histories)
+        assert all(history["decisive_event_ids"] for history in histories)
+        assert all(history["action_turn_index"] > history["decisive_turn_index"] for history in histories)
         assert packet["language_variants"][0]["example_sha256"] == variant_sha256(candidate.language_variants[0])
         assert packet["canonical_scenario_sha256"] == canonical_scenario_sha256(candidate)
         serialized = json.dumps(packet, ensure_ascii=False)
@@ -270,14 +278,17 @@ def test_reviewer_packets_include_formal_spec_but_exclude_labels_and_judge_predi
 
 def _annotation(example_id, example_hash, reviewer_id, relation="equivalent", scenario_hash="c" * 64):
     return {
+        "annotation_schema_version": "p2b1-annotation-2",
         "example_id": example_id,
         "example_sha256": example_hash,
         "canonical_scenario_sha256": scenario_hash,
         "reviewer_id": reviewer_id,
         "semantic_relation": relation,
         "linguistic_quality": "natural",
-        "decisive_turn_sufficiency": "no",
-        "historical_dependence_rationale": "The earlier requirement is needed to interpret the relative revision.",
+        "decisive_update_dependence": "no",
+        "decisive_update_dependence_rationale": "The earlier numeric cap is needed to calculate the revised cap.",
+        "whole_action_dependence": "no",
+        "whole_action_dependence_rationale": "The earlier numeric cap is needed to assess the action.",
         "issue_codes": [],
         "checklist": {
             "matches_formal_spec": True,
@@ -308,29 +319,37 @@ def test_annotation_summary_requires_two_independent_reviewers_and_reports_agree
     assert summary.reviewer_count == 2
     assert summary.raw_semantic_agreement == 1.0
     assert summary.cohen_kappa == 1.0
-    assert summary.historical_dependence_agreement == 1.0
+    assert summary.decisive_update_dependence_agreement == 1.0
+    assert summary.whole_action_dependence_agreement == 1.0
     assert summary.linguistic_quality_agreement == 1.0
     assert summary.issue_code_exact_agreement == 1.0
     assert summary.checklist_item_agreement["matches_formal_spec"] == 1.0
 
 
-def test_annotation_requires_a_historical_dependence_assessment_and_rationale():
+@pytest.mark.parametrize(
+    ("assessment_field", "rationale_field"),
+    [
+        ("decisive_update_dependence", "decisive_update_dependence_rationale"),
+        ("whole_action_dependence", "whole_action_dependence_rationale"),
+    ],
+)
+def test_annotation_requires_two_dependence_assessments_and_rationales(assessment_field, rationale_field):
     expected = {"item-1": "a" * 64}
     expected_scenarios = {"item-1": "c" * 64}
     record = _annotation("item-1", "a" * 64, "reviewer_a")
 
-    del record["decisive_turn_sufficiency"]
+    del record[assessment_field]
     with pytest.raises(PreflightValidationError, match="missing required fields"):
         summarize_annotations([record], expected, expected_scenarios)
 
     record = _annotation("item-1", "a" * 64, "reviewer_a")
-    record["decisive_turn_sufficiency"] = "maybe"
-    with pytest.raises(PreflightValidationError, match="decisive_turn_sufficiency is invalid"):
+    record[assessment_field] = "maybe"
+    with pytest.raises(PreflightValidationError, match=f"{assessment_field} is invalid"):
         summarize_annotations([record], expected, expected_scenarios)
 
     record = _annotation("item-1", "a" * 64, "reviewer_a")
-    record["historical_dependence_rationale"] = "   "
-    with pytest.raises(PreflightValidationError, match="historical_dependence_rationale is required"):
+    record[rationale_field] = "   "
+    with pytest.raises(PreflightValidationError, match=f"{rationale_field} is required"):
         summarize_annotations([record], expected, expected_scenarios)
 
 
@@ -341,19 +360,95 @@ def test_annotation_rejects_a_stale_canonical_scenario_hash():
         summarize_annotations([record], {"item-1": "a" * 64}, {"item-1": "c" * 64})
 
 
-def test_annotation_summary_reports_decisive_turn_sufficiency_agreement():
+def test_annotation_rejects_an_unsupported_schema_version():
+    record = _annotation("item-1", "a" * 64, "reviewer_a")
+    record["annotation_schema_version"] = "p2b1-annotation-1"
+
+    with pytest.raises(PreflightValidationError, match="annotation schema version is unsupported"):
+        summarize_annotations([record], {"item-1": "a" * 64}, {"item-1": "c" * 64})
+
+
+def test_annotation_summary_reports_the_two_dependence_agreements_separately():
     records = [
         _annotation("item-1", "a" * 64, "reviewer_a"),
         _annotation("item-1", "a" * 64, "reviewer_b"),
     ]
-    records[0]["decisive_turn_sufficiency"] = "yes"
-    records[0]["historical_dependence_rationale"] = "The decisive instruction supplies the only changed requirement."
-    records[1]["decisive_turn_sufficiency"] = "no"
-    records[1]["historical_dependence_rationale"] = "The earlier constraint is needed to resolve the instruction."
+    records[0]["decisive_update_dependence"] = "yes"
+    records[0]["decisive_update_dependence_rationale"] = "The decisive turn supplies the full revised limit."
+    records[1]["decisive_update_dependence"] = "no"
+    records[1]["decisive_update_dependence_rationale"] = "The earlier limit is needed to calculate the revision."
+    records[0]["whole_action_dependence"] = "yes"
+    records[0]["whole_action_dependence_rationale"] = "The decisive turn and action specify all validity facts."
+    records[1]["whole_action_dependence"] = "no"
+    records[1]["whole_action_dependence_rationale"] = "An earlier permission grant is needed to validate the action."
 
     summary = summarize_annotations(records, {"item-1": "a" * 64}, {"item-1": "c" * 64})
 
-    assert summary.historical_dependence_agreement == 0.0
+    assert summary.decisive_update_dependence_agreement == 0.0
+    assert summary.whole_action_dependence_agreement == 0.0
+
+
+def test_blank_annotation_record_versions_and_separates_both_dependence_constructs():
+    builder = getattr(preflight_module, "blank_annotation_record", None)
+    assert callable(builder)
+
+    record = builder("item-1", "a" * 64, "c" * 64)
+
+    assert record["annotation_schema_version"] == "p2b1-annotation-2"
+    assert record["decisive_update_dependence"] == ""
+    assert record["decisive_update_dependence_rationale"] == ""
+    assert record["whole_action_dependence"] == ""
+    assert record["whole_action_dependence_rationale"] == ""
+    assert record["example_sha256"] == "a" * 64
+    assert record["canonical_scenario_sha256"] == "c" * 64
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("decisive_update_dependence", "yes"),
+        ("whole_action_dependence", "yes"),
+    ],
+)
+def test_disagreement_on_either_dependence_construct_requires_adjudication(field, value):
+    records = [
+        _annotation("item-1", "a" * 64, "reviewer_a"),
+        _annotation("item-1", "a" * 64, "reviewer_b"),
+    ]
+    records[1][field] = value
+
+    with pytest.raises(PreflightValidationError, match="missing adjudication"):
+        validate_adjudication_records([], records)
+
+
+def test_rationale_wording_difference_alone_does_not_require_adjudication():
+    records = [
+        _annotation("item-1", "a" * 64, "reviewer_a"),
+        _annotation("item-1", "a" * 64, "reviewer_b"),
+    ]
+    records[1]["decisive_update_dependence_rationale"] = "A different explanation, with the same categorical answer."
+    records[1]["whole_action_dependence_rationale"] = "A separate explanation, also with the same categorical answer."
+
+    result = validate_adjudication_records([], records)
+
+    assert result.required_count == 0
+    assert result.adjudication_count == 0
+    assert result.complete is True
+
+
+def test_incomplete_annotation_coverage_is_not_reported_as_review_complete():
+    expected_hashes = {"item-1": "a" * 64, "item-2": "b" * 64}
+    expected_scenarios = {"item-1": "c" * 64, "item-2": "d" * 64}
+    one_record = _annotation("item-1", "a" * 64, "reviewer_a", scenario_hash="c" * 64)
+
+    annotations = summarize_annotations([one_record], expected_hashes, expected_scenarios)
+    adjudications = validate_adjudication_records([], [one_record])
+
+    assert annotations.complete is False
+    assert annotations.decisive_update_dependence_agreement is None
+    assert annotations.whole_action_dependence_agreement is None
+    assert adjudications.incomplete_pair_count == 1
+    assert adjudications.complete is False
 
 
 def test_annotation_summary_rejects_reference_labels_and_prediction_fields():
@@ -375,14 +470,141 @@ def test_adjudication_is_required_for_disagreements_and_must_reference_exact_has
         validate_adjudication_records([], records)
 
     adjudication = {
+        "adjudication_schema_version": "p2b1-adjudication-2",
         "example_id": "item-1",
         "example_sha256": digest,
+        "canonical_scenario_sha256": "c" * 64,
         "reviewer_ids": ["reviewer_a", "reviewer_b"],
         "adjudicator_id": "adjudicator_1",
         "outcome": "retain",
         "rationale": "The ambiguity was resolved against the formal specification.",
     }
-    assert validate_adjudication_records([adjudication], records) == 1
+    result = validate_adjudication_records([adjudication], records)
+    assert result.required_count == 1
+    assert result.adjudication_count == 1
+    assert result.complete is True
+
+
+@pytest.mark.parametrize(
+    ("hash_field", "stale_value"),
+    [
+        ("example_sha256", "b" * 64),
+        ("canonical_scenario_sha256", "d" * 64),
+    ],
+)
+def test_adjudication_rejects_stale_variant_or_canonical_hash(hash_field, stale_value):
+    records = [
+        _annotation("item-1", "a" * 64, "reviewer_a"),
+        _annotation("item-1", "a" * 64, "reviewer_b", relation="ambiguous"),
+    ]
+    adjudication = {
+        "adjudication_schema_version": "p2b1-adjudication-2",
+        "example_id": "item-1",
+        "example_sha256": "a" * 64,
+        "canonical_scenario_sha256": "c" * 64,
+        "reviewer_ids": ["reviewer_a", "reviewer_b"],
+        "adjudicator_id": "adjudicator_1",
+        "outcome": "retain",
+        "rationale": "Reviewed against the formal specification.",
+    }
+    adjudication[hash_field] = stale_value
+
+    with pytest.raises(PreflightValidationError, match="does not match both annotations"):
+        validate_adjudication_records([adjudication], records)
+
+
+def test_unresolved_adjudication_does_not_complete_review_resolution():
+    records = [
+        _annotation("item-1", "a" * 64, "reviewer_a"),
+        _annotation("item-1", "a" * 64, "reviewer_b", relation="ambiguous"),
+    ]
+    adjudication = {
+        "adjudication_schema_version": "p2b1-adjudication-2",
+        "example_id": "item-1",
+        "example_sha256": "a" * 64,
+        "canonical_scenario_sha256": "c" * 64,
+        "reviewer_ids": ["reviewer_a", "reviewer_b"],
+        "adjudicator_id": "adjudicator_1",
+        "outcome": "unresolved",
+        "rationale": "The reviewers' interpretations remain unresolved.",
+    }
+
+    result = validate_adjudication_records([adjudication], records)
+
+    assert result.required_count == 1
+    assert result.adjudication_count == 1
+    assert result.unresolved_count == 1
+    assert result.complete is False
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("linguistic_quality", "unnatural_or_unclear"),
+        ("issue_codes", ["incorrect_number"]),
+        ("checklist", {"matches_formal_spec": False}),
+    ],
+)
+def test_existing_linguistic_issue_and_checklist_disagreements_still_require_adjudication(field, value):
+    records = [
+        _annotation("item-1", "a" * 64, "reviewer_a"),
+        _annotation("item-1", "a" * 64, "reviewer_b"),
+    ]
+    if field == "checklist":
+        records[1][field]["matches_formal_spec"] = False
+    else:
+        records[1][field] = value
+
+    with pytest.raises(PreflightValidationError, match="missing adjudication"):
+        validate_adjudication_records([], records)
+
+
+def test_adjudication_rejects_duplicate_unknown_and_malformed_records():
+    records = [
+        _annotation("item-1", "a" * 64, "reviewer_a"),
+        _annotation("item-1", "a" * 64, "reviewer_b", relation="ambiguous"),
+    ]
+    adjudication = {
+        "adjudication_schema_version": "p2b1-adjudication-2",
+        "example_id": "item-1",
+        "example_sha256": "a" * 64,
+        "canonical_scenario_sha256": "c" * 64,
+        "reviewer_ids": ["reviewer_a", "reviewer_b"],
+        "adjudicator_id": "adjudicator_1",
+        "outcome": "retain",
+        "rationale": "Resolved against the formal specification.",
+    }
+    with pytest.raises(PreflightValidationError, match="exactly once"):
+        validate_adjudication_records([adjudication, adjudication], records)
+    unknown = dict(adjudication, example_id="unknown-item")
+    with pytest.raises(PreflightValidationError, match="exactly once"):
+        validate_adjudication_records([unknown], records)
+    malformed = dict(adjudication, reviewer_ids="reviewer_a,reviewer_b")
+    with pytest.raises(PreflightValidationError, match="reviewer IDs must be two distinct non-empty strings"):
+        validate_adjudication_records([malformed], records)
+    unsupported = dict(adjudication, adjudication_schema_version="p2b1-adjudication-1")
+    with pytest.raises(PreflightValidationError, match="adjudication schema version is unsupported"):
+        validate_adjudication_records([unsupported], records)
+
+
+def test_adjudication_pair_requires_both_annotations_to_match_both_hashes():
+    records = [
+        _annotation("item-1", "a" * 64, "reviewer_a"),
+        _annotation("item-1", "a" * 64, "reviewer_b", relation="ambiguous", scenario_hash="d" * 64),
+    ]
+    adjudication = {
+        "adjudication_schema_version": "p2b1-adjudication-2",
+        "example_id": "item-1",
+        "example_sha256": "a" * 64,
+        "canonical_scenario_sha256": "c" * 64,
+        "reviewer_ids": ["reviewer_a", "reviewer_b"],
+        "adjudicator_id": "adjudicator_1",
+        "outcome": "retain",
+        "rationale": "Reviewed against the formal specification.",
+    }
+
+    with pytest.raises(PreflightValidationError, match="canonical_scenario_sha256 does not match"):
+        validate_adjudication_records([adjudication], records)
 
 
 def test_jsonl_record_writer_appends_records_inside_the_private_data_root(tmp_path):

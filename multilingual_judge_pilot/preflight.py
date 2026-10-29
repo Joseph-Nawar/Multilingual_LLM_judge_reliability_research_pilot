@@ -1,4 +1,4 @@
-"""Small deterministic utilities for the P2A local authoring preflight.
+"""Small deterministic utilities for P2A/P2B-1 local authoring review.
 
 These checks establish schema, oracle, chronology, and span-reference coverage.
 They cannot establish that a language span faithfully expresses its formal target.
@@ -39,7 +39,7 @@ from .serialization import scenario_from_json
 
 
 class PreflightValidationError(ValueError):
-    """A local P2A prototype, coverage map, or review record is invalid."""
+    """A local prototype, coverage map, annotation, or adjudication record is invalid."""
 
 
 @dataclass(frozen=True)
@@ -66,10 +66,20 @@ class AnnotationAudit:
     complete: bool
     raw_semantic_agreement: float | None
     cohen_kappa: float | None
-    historical_dependence_agreement: float | None
+    decisive_update_dependence_agreement: float | None
+    whole_action_dependence_agreement: float | None
     linguistic_quality_agreement: float | None
     issue_code_exact_agreement: float | None
     checklist_item_agreement: dict[str, float]
+
+
+@dataclass(frozen=True)
+class AdjudicationAudit:
+    required_count: int
+    adjudication_count: int
+    unresolved_count: int
+    incomplete_pair_count: int
+    complete: bool
 
 
 @dataclass(frozen=True)
@@ -108,7 +118,10 @@ _COVERAGE_TARGET_TYPES = {
 }
 _ANNOTATION_RELATIONS = {"equivalent", "meaning_changed", "ambiguous"}
 _LINGUISTIC_QUALITIES = {"natural", "acceptable_variation", "unnatural_or_unclear"}
-_DECISIVE_TURN_SUFFICIENCY = {"yes", "no", "unclear"}
+_DEPENDENCE_CATEGORIES = {"yes", "no", "unclear"}
+ANNOTATION_SCHEMA_VERSION = "p2b1-annotation-2"
+ADJUDICATION_SCHEMA_VERSION = "p2b1-adjudication-2"
+REVIEW_PACKET_VERSION = "p2b1-review-3"
 _ANNOTATION_ISSUES = {
     "incorrect_number",
     "incorrect_time",
@@ -137,14 +150,17 @@ _FORBIDDEN_ANNOTATION_FIELDS = {
     "judge_response",
 }
 _ANNOTATION_REQUIRED_FIELDS = {
+    "annotation_schema_version",
     "example_id",
     "example_sha256",
     "canonical_scenario_sha256",
     "reviewer_id",
     "semantic_relation",
     "linguistic_quality",
-    "decisive_turn_sufficiency",
-    "historical_dependence_rationale",
+    "decisive_update_dependence",
+    "decisive_update_dependence_rationale",
+    "whole_action_dependence",
+    "whole_action_dependence_rationale",
     "issue_codes",
     "checklist",
     "notes",
@@ -161,6 +177,32 @@ def variant_sha256(variant: object) -> str:
 def canonical_scenario_sha256(scenario: CanonicalScenario) -> str:
     """Hash the formal scenario record reviewed alongside each language variant."""
     return hashlib.sha256(stable_json(scenario).encode("utf-8")).hexdigest()
+
+
+def blank_annotation_record(example_id: str, example_hash: str, scenario_hash: str) -> dict:
+    """Create an unfilled, versioned annotation row bound to both reviewed objects."""
+    if not isinstance(example_id, str) or not example_id.strip():
+        raise PreflightValidationError("annotation example ID is required")
+    if not isinstance(example_hash, str) or not _HEX_SHA256.fullmatch(example_hash):
+        raise PreflightValidationError("annotation example hash must be a lowercase SHA-256 digest")
+    if not isinstance(scenario_hash, str) or not _HEX_SHA256.fullmatch(scenario_hash):
+        raise PreflightValidationError("annotation canonical-scenario hash must be a lowercase SHA-256 digest")
+    return {
+        "annotation_schema_version": ANNOTATION_SCHEMA_VERSION,
+        "example_id": example_id,
+        "example_sha256": example_hash,
+        "canonical_scenario_sha256": scenario_hash,
+        "reviewer_id": "",
+        "semantic_relation": "",
+        "linguistic_quality": "",
+        "decisive_update_dependence": "",
+        "decisive_update_dependence_rationale": "",
+        "whole_action_dependence": "",
+        "whole_action_dependence_rationale": "",
+        "issue_codes": [],
+        "checklist": {field: None for field in sorted(_CHECKLIST_FIELDS)},
+        "notes": "",
+    }
 
 
 def _expected_coverage_targets(scenario: CanonicalScenario, history) -> dict[tuple[str, str], int]:
@@ -281,20 +323,14 @@ def _formal_review_spec(scenario: CanonicalScenario) -> dict:
         "action": canonical_value(scenario.action),
         "action_contract": canonical_value(scenario.action_contract),
         "public_tool_schema": canonical_value(scenario.public_tool_schema),
-        "initial_states": [
+        "histories": [
             {
                 "history_id": history.history_id,
-                "requirements": [canonical_value(row) for row in history.initial_state.requirements],
-                "permissions": [canonical_value(row) for row in history.initial_state.grants],
-            }
-            for history in scenario.histories
-        ],
-        "events": [
-            {
-                "history_id": history.history_id,
+                "initial_state": canonical_value(history.initial_state),
+                "events": [canonical_value(event) for event in history.events],
+                "decisive_event_ids": list(history.decisive_event_ids),
                 "decisive_turn_index": history.decisive_turn_index,
                 "action_turn_index": history.action_turn_index,
-                "events": [canonical_value(event) for event in history.events],
             }
             for history in scenario.histories
         ],
@@ -347,7 +383,9 @@ def export_reviewer_packets(
             directory = output_root / reviewer_id
             directory.mkdir(parents=True, exist_ok=True)
             packet = {
-                "packet_version": "p2b1-review-2",
+                "packet_version": REVIEW_PACKET_VERSION,
+                "annotation_schema_version": ANNOTATION_SCHEMA_VERSION,
+                "adjudication_schema_version": ADJUDICATION_SCHEMA_VERSION,
                 "reviewer_slot": reviewer_id,
                 "scenario_id": scenario.scenario_id,
                 "instruction": "Review independently. Do not view or discuss model-judge predictions. Explicit oracle verdicts and gold-label fields are omitted. This is machine-assisted draft language and is not independently validated.",
@@ -372,27 +410,40 @@ def _validate_annotation_record(
     forbidden = _FORBIDDEN_ANNOTATION_FIELDS & set(record)
     if forbidden:
         raise PreflightValidationError(f"prohibited annotation fields: {', '.join(sorted(forbidden))}")
-    if not _ANNOTATION_REQUIRED_FIELDS <= set(record):
+    missing = _ANNOTATION_REQUIRED_FIELDS - set(record)
+    unknown = set(record) - _ANNOTATION_REQUIRED_FIELDS
+    if missing:
         raise PreflightValidationError("annotation record is missing required fields")
+    if unknown:
+        raise PreflightValidationError(f"annotation record has unknown fields: {', '.join(sorted(unknown))}")
+    if record["annotation_schema_version"] != ANNOTATION_SCHEMA_VERSION:
+        raise PreflightValidationError("annotation schema version is unsupported")
     example_id = record["example_id"]
+    if not isinstance(example_id, str) or not example_id.strip():
+        raise PreflightValidationError("annotation example ID is required")
+    if not isinstance(record["reviewer_id"], str) or not record["reviewer_id"].strip():
+        raise PreflightValidationError("annotation reviewer ID is required")
+    for field in ("example_sha256", "canonical_scenario_sha256"):
+        if not isinstance(record[field], str) or not _HEX_SHA256.fullmatch(record[field]):
+            raise PreflightValidationError(f"annotation {field} must be a lowercase SHA-256 digest")
     if example_id not in expected_hashes or record["example_sha256"] != expected_hashes[example_id]:
         raise PreflightValidationError("annotation references an unknown or changed example hash")
     if example_id not in expected_scenario_hashes or record["canonical_scenario_sha256"] != expected_scenario_hashes[example_id]:
         raise PreflightValidationError("annotation canonical_scenario_sha256 does not match the reviewed formal scenario")
-    if not isinstance(record["reviewer_id"], str) or not record["reviewer_id"].strip():
-        raise PreflightValidationError("annotation reviewer ID is required")
-    if record["semantic_relation"] not in _ANNOTATION_RELATIONS:
+    if not isinstance(record["semantic_relation"], str) or record["semantic_relation"] not in _ANNOTATION_RELATIONS:
         raise PreflightValidationError("annotation semantic_relation is invalid")
-    if record["linguistic_quality"] not in _LINGUISTIC_QUALITIES:
+    if not isinstance(record["linguistic_quality"], str) or record["linguistic_quality"] not in _LINGUISTIC_QUALITIES:
         raise PreflightValidationError("annotation linguistic_quality is invalid")
-    if record["decisive_turn_sufficiency"] not in _DECISIVE_TURN_SUFFICIENCY:
-        raise PreflightValidationError("annotation decisive_turn_sufficiency is invalid")
-    if not isinstance(record["historical_dependence_rationale"], str) or not record[
-        "historical_dependence_rationale"
-    ].strip():
-        raise PreflightValidationError("annotation historical_dependence_rationale is required")
+    for field in ("decisive_update_dependence", "whole_action_dependence"):
+        if not isinstance(record[field], str) or record[field] not in _DEPENDENCE_CATEGORIES:
+            raise PreflightValidationError(f"annotation {field} is invalid")
+    for field in ("decisive_update_dependence_rationale", "whole_action_dependence_rationale"):
+        if not isinstance(record[field], str) or not record[field].strip():
+            raise PreflightValidationError(f"annotation {field} is required")
     issues = record["issue_codes"]
-    if not isinstance(issues, list) or len(issues) != len(set(issues)) or not set(issues) <= _ANNOTATION_ISSUES:
+    if not isinstance(issues, list) or any(not isinstance(issue, str) for issue in issues):
+        raise PreflightValidationError("annotation issue_codes are invalid")
+    if len(issues) != len(set(issues)) or not set(issues) <= _ANNOTATION_ISSUES:
         raise PreflightValidationError("annotation issue_codes are invalid")
     checklist = record["checklist"]
     if not isinstance(checklist, dict) or set(checklist) != _CHECKLIST_FIELDS or any(
@@ -422,7 +473,8 @@ def summarize_annotations(
     complete = len(reviewer_ids) == 2 and all(set(by_example.get(example_id, {})) == reviewer_ids for example_id in expected_hashes)
     agreement: float | None = None
     kappa: float | None = None
-    history_sufficiency_agreement: float | None = None
+    decisive_update_agreement: float | None = None
+    whole_action_agreement: float | None = None
     linguistic_agreement: float | None = None
     issue_agreement: float | None = None
     checklist_agreement: dict[str, float] = {}
@@ -444,8 +496,12 @@ def summarize_annotations(
             for category in categories
         )
         kappa = (observed - expected) / (1 - expected) if expected < 1 else None
-        history_sufficiency_agreement = sum(
-            left["decisive_turn_sufficiency"] == right["decisive_turn_sufficiency"]
+        decisive_update_agreement = sum(
+            left["decisive_update_dependence"] == right["decisive_update_dependence"]
+            for left, right in rows
+        ) / len(rows)
+        whole_action_agreement = sum(
+            left["whole_action_dependence"] == right["whole_action_dependence"]
             for left, right in rows
         ) / len(rows)
         linguistic_agreement = sum(
@@ -465,54 +521,126 @@ def summarize_annotations(
         complete=complete,
         raw_semantic_agreement=agreement,
         cohen_kappa=kappa,
-        historical_dependence_agreement=history_sufficiency_agreement,
+        decisive_update_dependence_agreement=decisive_update_agreement,
+        whole_action_dependence_agreement=whole_action_agreement,
         linguistic_quality_agreement=linguistic_agreement,
         issue_code_exact_agreement=issue_agreement,
         checklist_item_agreement=checklist_agreement,
     )
 
 
-def validate_adjudication_records(adjudications: Iterable[dict], annotations: Iterable[dict]) -> int:
-    """Require a hash-bound adjudication for each disagreement between two reviews."""
+def validate_adjudication_records(
+    adjudications: Iterable[dict], annotations: Iterable[dict]
+) -> AdjudicationAudit:
+    """Validate hash-bound adjudications for disagreements in complete reviewer pairs."""
     grouped: dict[str, list[dict]] = defaultdict(list)
     for annotation in annotations:
-        if not isinstance(annotation, dict) or "example_id" not in annotation:
+        if not isinstance(annotation, dict) or not isinstance(annotation.get("example_id"), str):
             raise PreflightValidationError("cannot group malformed annotation records")
         grouped[annotation["example_id"]].append(annotation)
 
-    expected: set[str] = set()
+    expected: dict[str, list[dict]] = {}
+    incomplete_pair_count = 0
     for example_id, rows in grouped.items():
+        if len(rows) == 1:
+            row = rows[0]
+            _validate_annotation_record(
+                row,
+                {example_id: row.get("example_sha256")},
+                {example_id: row.get("canonical_scenario_sha256")},
+            )
+            incomplete_pair_count += 1
+            continue
         if len(rows) != 2:
-            raise PreflightValidationError(f"adjudication audit requires two annotations for {example_id}")
-        comparable = ("semantic_relation", "linguistic_quality", "issue_codes", "checklist")
+            raise PreflightValidationError(f"adjudication audit requires at most two annotations for {example_id}")
+
+        first = rows[0]
+        expected_hashes = {example_id: first.get("example_sha256")}
+        expected_scenario_hashes = {example_id: first.get("canonical_scenario_sha256")}
+        for row in rows:
+            _validate_annotation_record(row, expected_hashes, expected_scenario_hashes)
+        if rows[0]["reviewer_id"] == rows[1]["reviewer_id"]:
+            raise PreflightValidationError(f"adjudication audit requires two distinct reviewers for {example_id}")
+
+        comparable = (
+            "semantic_relation",
+            "linguistic_quality",
+            "decisive_update_dependence",
+            "whole_action_dependence",
+            "issue_codes",
+            "checklist",
+        )
         if any(rows[0].get(field) != rows[1].get(field) for field in comparable):
-            expected.add(example_id)
+            expected[example_id] = rows
 
     observed: dict[str, dict] = {}
     for record in adjudications:
         if not isinstance(record, dict):
             raise PreflightValidationError("adjudication record must be a JSON object")
-        required = {"example_id", "example_sha256", "reviewer_ids", "adjudicator_id", "outcome", "rationale"}
+        required = {
+            "adjudication_schema_version",
+            "example_id",
+            "example_sha256",
+            "canonical_scenario_sha256",
+            "reviewer_ids",
+            "adjudicator_id",
+            "outcome",
+            "rationale",
+        }
         if not required <= set(record) or set(record) - (required | {"revision_sha256"}):
             raise PreflightValidationError("adjudication record has missing or unknown fields")
+        if record["adjudication_schema_version"] != ADJUDICATION_SCHEMA_VERSION:
+            raise PreflightValidationError("adjudication schema version is unsupported")
         example_id = record["example_id"]
+        if not isinstance(example_id, str) or not example_id.strip():
+            raise PreflightValidationError("adjudication example ID is required")
         if example_id not in expected or example_id in observed:
             raise PreflightValidationError("adjudication must reference one unresolved disagreement exactly once")
-        rows = grouped[example_id]
-        if record["example_sha256"] != rows[0].get("example_sha256"):
-            raise PreflightValidationError("adjudication example hash does not match annotations")
-        if set(record["reviewer_ids"]) != {row.get("reviewer_id") for row in rows}:
+        rows = expected[example_id]
+        for field in ("example_sha256", "canonical_scenario_sha256"):
+            digest = record[field]
+            if not isinstance(digest, str) or not _HEX_SHA256.fullmatch(digest):
+                raise PreflightValidationError(f"adjudication {field} must be a lowercase SHA-256 digest")
+            if any(digest != row[field] for row in rows):
+                raise PreflightValidationError(f"adjudication {field} does not match both annotations")
+        reviewer_ids = record["reviewer_ids"]
+        if (
+            not isinstance(reviewer_ids, list)
+            or len(reviewer_ids) != 2
+            or any(not isinstance(reviewer_id, str) or not reviewer_id.strip() for reviewer_id in reviewer_ids)
+            or len(set(reviewer_ids)) != 2
+        ):
+            raise PreflightValidationError("adjudication reviewer IDs must be two distinct non-empty strings")
+        if set(reviewer_ids) != {row["reviewer_id"] for row in rows}:
             raise PreflightValidationError("adjudication reviewer IDs do not match independent annotations")
-        if not record["adjudicator_id"] or not record["rationale"] or record["outcome"] not in _ADJUDICATION_OUTCOMES:
+        if (
+            not isinstance(record["adjudicator_id"], str)
+            or not record["adjudicator_id"].strip()
+            or not isinstance(record["rationale"], str)
+            or not record["rationale"].strip()
+            or not isinstance(record["outcome"], str)
+            or record["outcome"] not in _ADJUDICATION_OUTCOMES
+        ):
             raise PreflightValidationError("adjudication needs an adjudicator, rationale, and valid outcome")
+        if "revision_sha256" in record and (
+            not isinstance(record["revision_sha256"], str) or not _HEX_SHA256.fullmatch(record["revision_sha256"])
+        ):
+            raise PreflightValidationError("adjudication revision_sha256 must be a lowercase SHA-256 digest")
         if record["outcome"] == "revise" and not _HEX_SHA256.fullmatch(record.get("revision_sha256", "")):
             raise PreflightValidationError("revised examples require their new content hash")
         observed[example_id] = record
 
-    missing = expected - set(observed)
+    missing = set(expected) - set(observed)
     if missing:
         raise PreflightValidationError(f"missing adjudication for disagreement(s): {', '.join(sorted(missing))}")
-    return len(observed)
+    unresolved_count = sum(record["outcome"] == "unresolved" for record in observed.values())
+    return AdjudicationAudit(
+        required_count=len(expected),
+        adjudication_count=len(observed),
+        unresolved_count=unresolved_count,
+        incomplete_pair_count=incomplete_pair_count,
+        complete=not incomplete_pair_count and not unresolved_count,
+    )
 
 
 def append_jsonl_record(data_root: Path, relative_path: str, record: dict) -> Path:
@@ -690,11 +818,11 @@ The preflight demonstrates that P1's bounded schema and oracle can support the f
 
 ## P2B-1 draft-correction status
 
-The four existing drafts were revised after independent content-audit findings. Wording was clarified, one public tool description was aligned with its intended operation, and relative numerical and temporal revision forms were adopted to exercise earlier-state reconstruction. Formal effective constraints and counterfactual oracle relationships were preserved. These changes remain unvalidated natural-language drafts; the provisional complexity assessment is not a human annotation.
+The four existing drafts were revised after independent content-audit findings. Wording was clarified, one public tool description was aligned with its intended operation, and relative numerical and temporal revision forms were adopted to exercise earlier-state reconstruction. Formal effective constraints and counterfactual oracle relationships were preserved. These changes remain unvalidated natural-language drafts. Author-side provisional assessments of decisive-update and whole-action dependence are withheld from independent reviewers and are not human annotations.
 
 ## Human review status
 
-All English and MSA conversations are Codex-authored, machine-assisted drafts marked **not independently validated**. Completed independent annotations: 0 of 64 expected; adjudications: 0. Two qualified bilingual reviewers must review every variant against the formal specification without access to judge predictions. Substantive corrections require re-review against new variant and canonical-scenario hashes. Reviewer slots and blank templates are preparation materials, not reviewer records.
+All English and MSA conversations are Codex-authored, machine-assisted drafts marked **not independently validated**. Completed independent annotations: 0 of 64 expected; adjudications: 0. Two qualified bilingual reviewers must review every variant against the formal specification without access to judge predictions. Each annotation records decisive-update dependence and whole-action dependence separately, with a separate rationale for each; disagreement on either category requires hash-bound adjudication. Substantive corrections require re-review against new variant and canonical-scenario hashes. Reviewer slots and blank templates are preparation materials, not reviewer records.
 
 ## Remaining surface-feature risks
 
@@ -776,16 +904,7 @@ def _cli() -> int:
     annotations = _read_jsonl(args.annotations)
     audit = summarize_annotations(annotations, expected_hashes, expected_scenario_hashes)
     adjudications = _read_jsonl(args.adjudications)
-    grouped_annotations: dict[str, list[dict]] = defaultdict(list)
-    for record in annotations:
-        grouped_annotations[record["example_id"]].append(record)
-    complete_annotation_pairs = [
-        record
-        for rows in grouped_annotations.values()
-        if len(rows) == 2
-        for record in rows
-    ]
-    adjudication_count = validate_adjudication_records(adjudications, complete_annotation_pairs)
+    adjudication_audit = validate_adjudication_records(adjudications, annotations)
     print(json.dumps({
         "expected_examples": audit.expected_example_count,
         "annotated_examples": audit.annotated_example_count,
@@ -794,11 +913,17 @@ def _cli() -> int:
         "missing_annotation_rows": max(0, 2 * len(expected_hashes) - len(annotations)),
         "semantic_relation_percent_agreement": audit.raw_semantic_agreement,
         "cohen_kappa": audit.cohen_kappa,
-        "decisive_turn_sufficiency_percent_agreement": audit.historical_dependence_agreement,
+        "decisive_update_dependence_percent_agreement": audit.decisive_update_dependence_agreement,
+        "whole_action_dependence_percent_agreement": audit.whole_action_dependence_agreement,
         "linguistic_quality_percent_agreement": audit.linguistic_quality_agreement,
         "issue_code_exact_percent_agreement": audit.issue_code_exact_agreement,
         "checklist_item_agreement": audit.checklist_item_agreement,
-        "adjudication_count": adjudication_count,
+        "adjudications_required": adjudication_audit.required_count,
+        "adjudications_recorded": adjudication_audit.adjudication_count,
+        "unresolved_adjudications": adjudication_audit.unresolved_count,
+        "incomplete_annotation_pairs": adjudication_audit.incomplete_pair_count,
+        "adjudication_complete": adjudication_audit.complete,
+        "review_process_complete": audit.complete and adjudication_audit.complete,
     }, sort_keys=True))
     return 0
 

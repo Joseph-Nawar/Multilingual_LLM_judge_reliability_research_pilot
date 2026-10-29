@@ -27,11 +27,11 @@ The preflight demonstrates that P1's bounded schema and oracle can support the f
 
 ## P2B-1 draft-correction status
 
-The four existing drafts were revised after independent content-audit findings. Wording was clarified, one public tool description was aligned with its intended operation, and relative numerical and temporal revision forms were adopted to exercise earlier-state reconstruction. Formal effective constraints and counterfactual oracle relationships were preserved. These changes remain unvalidated natural-language drafts; the provisional complexity assessment is not a human annotation.
+The four existing drafts were revised after independent content-audit findings. Wording was clarified, one public tool description was aligned with its intended operation, and relative numerical and temporal revision forms were adopted to exercise earlier-state reconstruction. Formal effective constraints and counterfactual oracle relationships were preserved. These changes remain unvalidated natural-language drafts. Author-side provisional assessments of decisive-update and whole-action dependence are withheld from independent reviewers and are not human annotations.
 
 ## Human review status
 
-All English and MSA conversations are Codex-authored, machine-assisted drafts marked **not independently validated**. Completed independent annotations: 0 of 64 expected; adjudications: 0. Two qualified bilingual reviewers must review every variant against the formal specification without access to judge predictions. Substantive corrections require re-review against new variant and canonical-scenario hashes. Reviewer slots and blank templates are preparation materials, not reviewer records.
+All English and MSA conversations are Codex-authored, machine-assisted drafts marked **not independently validated**. Completed independent annotations: 0 of 64 expected; adjudications: 0. Two qualified bilingual reviewers must review every variant against the formal specification without access to judge predictions. Each annotation records decisive-update dependence and whole-action dependence separately, with a separate rationale for each; disagreement on either category requires hash-bound adjudication. Substantive corrections require re-review against new variant and canonical-scenario hashes. Reviewer slots and blank templates are preparation materials, not reviewer records.
 
 ## Remaining surface-feature risks
 

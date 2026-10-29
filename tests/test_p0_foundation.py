@@ -73,14 +73,18 @@ def test_p2b1_design_controls_cover_complexity_positions_and_constraint_polarity
     authoring = (ROOT / "docs" / "research" / "authoring-protocol.md").read_text()
     evaluation = (ROOT / "docs" / "research" / "evaluation-plan.md").read_text()
     annotation = (ROOT / "docs" / "research" / "bilingual-annotation-protocol.md").read_text()
-    assert "one directly specified scenario whose valid history is A" in blueprint
-    assert "one history-dependent scenario whose valid history is B" in blueprint
+    assert "decisive-update dependence" in blueprint
+    assert "two directly interpretable (`yes`) and two history-dependent (`no`) updates per cell" in blueprint
     assert "six upper-bound and six lower-bound" in blueprint
     assert "six earliest-bound and six latest-bound" in blueprint
-    assert "24 directly specified and 24 history-dependent" in authoring
+    assert "24 directly interpretable / 24 history-dependent" in authoring
+    assert "whole-action dependence" in authoring
     assert "UUIDv4" in evaluation
     assert "SHA-256" in evaluation
-    assert "Can the action's validity be uniquely determined from the decisive turn" in annotation
+    assert "Can the effective requirement introduced, revised, revoked, or preserved" in annotation
+    assert "Can the validity of the entire agent action be determined" in annotation
+    assert "p2b1-annotation-2" in annotation
+    assert "p2b1-adjudication-2" in annotation
     assert "canonical_scenario_sha256" in annotation
 
 

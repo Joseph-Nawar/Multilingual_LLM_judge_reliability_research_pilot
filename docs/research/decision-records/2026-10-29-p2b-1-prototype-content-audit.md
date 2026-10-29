@@ -8,6 +8,8 @@
 
 **Status:** Corrections and review materials are prepared for owner review. No independent bilingual annotations have been completed; the revised language remains unvalidated.
 
+**Subsequent methodological correction:** The historical-dependence annotation described below conflated interpretation of the decisive update with whole-action validity. The two constructs and revised allocation rule are documented in the [P2B dependence and adjudication repair record](2026-10-29-p2b-dependence-adjudication-repair.md).
+
 ## Independent findings and dispositions
 
 ### P2A-R2 — Counterfactual history ordering
