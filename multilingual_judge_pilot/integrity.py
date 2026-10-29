@@ -253,14 +253,11 @@ def _validate_scenario_structure(scenario: CanonicalScenario) -> tuple:
         if variant.assignment.decisive_turn_index != history.decisive_turn_index:
             raise SchemaValidationError("language variant decisive turn does not match the formal decisive event turn")
         turns_by_index = {turn.turn_index: turn for turn in variant.turns}
-        post_action_turns = sorted(
-            turn.turn_index
-            for turn in variant.turns
-            if turn.turn_index >= history.action_turn_index and turn.role.value in {"user", "tool"}
-        )
+        post_action_turns = sorted(turn.turn_index for turn in variant.turns if turn.turn_index >= history.action_turn_index)
         if post_action_turns:
             raise SchemaValidationError(
-                f"judge-facing conversation contains information after the action decision point: {post_action_turns}"
+                "judge-facing conversation contains turns at or after the action decision point "
+                f"for one or more speaker roles: {post_action_turns}"
             )
         for event in history.events:
             event_turn = turns_by_index.get(event.turn_index)

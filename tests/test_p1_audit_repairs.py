@@ -300,31 +300,40 @@ def test_language_variant_decisive_turn_must_match_formal_decisive_event():
         validate_scenario(candidate)
 
 
-def test_intermediate_non_decisive_turn_is_allowed_when_chronology_is_consistent():
+@pytest.mark.parametrize("role", [TurnRole.ASSISTANT, TurnRole.TOOL])
+def test_intermediate_pre_action_assistant_and_tool_turns_are_allowed(role):
     candidate = numerical_revision_pair()
     variant = english_variant(history_id=candidate.histories[0].history_id)
     intermediate = ConversationTurn(
         1,
-        TurnRole.ASSISTANT,
+        role,
         Language.ENGLISH,
-        (TextSegment("intermediate", TextSegmentKind.LOCALIZED_NATURAL_LANGUAGE, "Synthetic acknowledgement."),),
+        (TextSegment("intermediate", TextSegmentKind.LOCALIZED_NATURAL_LANGUAGE, "Synthetic intermediate turn."),),
     )
     variant = replace(variant, turns=(variant.turns[0], intermediate, variant.turns[1]))
     candidate = with_language_variants(candidate, (variant,))
 
     validate_scenario(candidate)
+    build_judge_facing_item(
+        candidate,
+        candidate.histories[0].history_id,
+        variant.derivative_id,
+        opaque_item_id=f"opaque-pre-action-{role.value}-fixture",
+    )
 
 
-def test_judge_projection_rejects_post_action_conversation_information():
+@pytest.mark.parametrize("role", [TurnRole.USER, TurnRole.ASSISTANT, TurnRole.TOOL])
+@pytest.mark.parametrize("turn_delta", [0, 1], ids=["at-action", "after-action"])
+def test_judge_projection_rejects_any_turn_at_or_after_action(role, turn_delta):
     candidate = numerical_revision_pair()
     variant = english_variant(history_id=candidate.histories[0].history_id)
-    after_action = ConversationTurn(
-        candidate.histories[0].action_turn_index,
-        TurnRole.USER,
+    prohibited_turn = ConversationTurn(
+        candidate.histories[0].action_turn_index + turn_delta,
+        role,
         Language.ENGLISH,
-        (TextSegment("after-action", TextSegmentKind.LOCALIZED_NATURAL_LANGUAGE, "Synthetic later authorization."),),
+        (TextSegment("post-action", TextSegmentKind.LOCALIZED_NATURAL_LANGUAGE, "Synthetic future information."),),
     )
-    variant = replace(variant, turns=(*variant.turns, after_action))
+    variant = replace(variant, turns=(*variant.turns, prohibited_turn))
     candidate = with_language_variants(candidate, (variant,))
 
     with pytest.raises(SchemaValidationError, match="after the action|post-action"):
