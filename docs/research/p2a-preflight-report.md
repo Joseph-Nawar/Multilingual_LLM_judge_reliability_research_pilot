@@ -2,6 +2,8 @@
 
 **Status:** Deterministic preflight complete; independent bilingual validation has not been performed.
 
+**Snapshot date:** 2026-10-29. The P2B-1 human-review counts below are historical and are superseded by the current [P2B-2 annotation audit](decision-records/2026-11-01-p2b-2-annotation-audit.md).
+
 ## Scope and structure
 
 - Four local, ignored primary development prototypes; no locked scenarios or auxiliary-control study examples.
