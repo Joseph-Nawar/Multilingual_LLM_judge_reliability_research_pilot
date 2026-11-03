@@ -8,7 +8,7 @@ Progress stops after each milestone until an evidence-based review accepts the c
 
 **Acceptance evidence:** primary design remains 48 scenarios, 96 histories, 384 items, with 12 development and 36 locked primary scenarios; separate no-change control is 12 scenarios and 96 items; all planned counts and splits are consistently documented; H1–H3 remain hypotheses; language, baseline, oracle, template, and data-access rules are explicit; audit decisions and deferrals have milestones; structural checks pass. No generator, dataset, inference runner, or model call exists.
 
-**Gate:** P0 was approved, followed by P1 approval and a separate P2A authorization on 2026-10-29. P2A alone permits the authoring procedure and exactly four local development prototypes; it does not authorize locked examples, study controls, or model inference.
+**Gate:** P0 was approved, followed by P1 and P2A approval. The P2B feasibility pilot is concluded with limitations. The current P2C authorization covers only the eight development primary scenarios needed to complete the 12-scenario development set; it does not authorize locked examples, study controls, dataset freeze, or model inference.
 
 ## P1 — Canonical schema, counterfactuals, deterministic oracle, integrity tests (approved)
 
@@ -26,29 +26,35 @@ Progress stops after each milestone until an evidence-based review accepts the c
 
 **Gate:** the research owner accepted the framework and approved P2A feasibility. The four language drafts still required content inspection and independent bilingual validation; P2A approval did not approve those translations as validated. P2B-1 has a separate, narrower authorization.
 
-## P2B-1 — Prototype corrections and human-review preparation (authorized)
+## P2B-1 — Prototype corrections and human-review preparation (completed)
 
 **Scope:** correct the four existing development prototypes in response to the independent content audit; preserve originals and hashes; update the prospective blueprint and annotation rubric; prepare hash-bound packets, blank templates, briefing, side-by-side presentation, and a completeness report. All private records remain ignored local data. This submilestone creates no additional scenarios, controls, locked examples, or judge results.
 
 **Acceptance evidence:** original bytes and hashes are preserved; each proposed change and rationale is in the revision ledger; revised formal records pass schema/oracle/counterfactual/chronology/coverage checks with all 32 language variants present; changed variants remain unvalidated. The blueprint addresses history-position counterbalancing, opaque IDs, reproducible order randomization, upper/lower and earliest/latest constraints, direction and surface-cue audit, and separate decisive-update versus whole-action dependence. Two reviewer slots have separate packets and versioned blank dual-hash annotation templates containing both questions and rationales; the completeness report states actual human coverage, including zero if no reviewer has submitted records. Adjudications bind both hashes, require resolution of disagreements on both dependence categories, and do not treat an unresolved disagreement as completed validation. Private-data isolation and redacted public reporting pass.
 
-**Gate:** the research owner reviews the corrected prototypes and review materials. No reviewer annotation is represented as complete until two qualified humans have independently submitted hash-matched records. P2B-1 does not authorize P2C or inference.
+**Gate:** the research owner reviewed the corrected prototypes and materials. This stage did not itself complete semantic validation or authorize inference.
 
-## P2B — Independent bilingual validation (not started beyond P2B-1 preparation)
+## P2B — Four-scenario feasibility pilot (concluded with documented limitations)
 
-**Deliverables:** two independent qualified bilingual reviews of approved prototype drafts and later separately authorized study variants; hash-bound annotations; disagreement adjudication; retained corrections, exclusions, and revision history; semantic near-duplicate review and template-family audit.
+**Evidence:** two bilingual reviewers assessed all 32 English/MSA language variants across four development scenarios. Initial semantic and linguistic assessments were positive: all variants were marked semantically equivalent; 40/64 reviewer ratings were `natural` and 24/64 `acceptable_variation`; no issue codes or failed checklist items were reported. Initial categorical ratings agreed for all 32 paired variants. Follow-up dependence forms supplied complete responses and rationales, but reviewers disagreed on decisive-update dependence in four of eight history combinations and whole-action dependence in four of eight; two histories were disputed on both constructs. No adjudication was performed, and the research owner directed that no further pilot review or adjudication be requested. These findings support authoring feasibility only, not full-benchmark semantic validity or independently resolved dependence annotation.
 
-**Acceptance evidence:** reviewers assess all decision-relevant meaning, initial requirements, decisive turns, actions, chronology, quantities, permissions, temporal expressions, invariant literals, decisive-update dependence, and whole-action dependence without judge predictions or oracle verdicts. Agreement for the two dependence constructs, missing reviews, disagreements, adjudications, and limitations are reported separately; substantive revisions receive full re-review. Codex-authored drafts are not human-approved by structural checks.
+**Lessons for future annotation:** keep the two dependence constructs distinct; state explicitly that `yes` means earlier conversation is unnecessary and `no` means it is necessary; ask reviewers to consider all requirements needed for the whole-action verdict, including earlier permissions; preserve `unclear`; and require construct-specific rationales. These clarifications do not rewrite prior human responses or convert disagreements into adjudicated labels.
 
-**Gate:** owner accepts reviewer qualifications, coverage, adjudication, and language/template findings before any dataset-freeze milestone. Completing P2B-1 preparation alone is not P2B validation.
+**Disposition:** no more review of these four pilot scenarios is authorized. Dependence disagreements remain unresolved. Full-study bilingual validation of future dataset variants remains a distinct required gate before any dataset freeze or evaluation; the concluded pilot is not reopened to satisfy that gate.
 
-## P2C — Dataset authoring, partition freeze, and release review (not started; separate authorization required)
+## P2C — Development-scenario authoring (eight scenarios authorized)
 
-**Deliverables:** complete 48-scenario primary set and separately identified 12-scenario auxiliary controls; frozen partitions, match/template/recipe inventories, provenance, exclusion ledger, hashes, and reviewed release package.
+**Current authorized deliverables:** author the eight remaining development primary scenarios in the eight uncovered domain × transition-family cells, with two formal histories and four language conditions per history; retain canonical-state-first authoring, provenance, semantic-coverage links, deterministic oracle checks, position counterbalancing, and private-data isolation. Combined with four existing pilot prototypes, the development set contains 12 primary scenarios and 96 derived items.
+
+**Acceptance evidence for this authorized scope:** all 12 primary cells are represented once in development; every scenario has two histories, each with four conditions; the deterministic oracle establishes opposite labels for the same well-formed action; structural chronology and semantic-coverage checks pass; valid-history position is balanced 6/6 across the 12 scenarios; duplicate checks report exact/normalized results and template/recipe reuse; no development language draft is mislabeled as human validated. All new data remain local and ignored.
+
+**Not authorized by this scope:** the 36 locked primary scenarios, 12 locked auxiliary controls, partition freeze, release, model selection or inference. These require a separate review and authorization.
+
+**Future P2C deliverables (not started):** complete the 48-scenario primary set and separately identified 12-scenario auxiliary controls; prepare partition manifests, match/template/recipe inventories, provenance, exclusion ledger, hashes, and release review package.
 
 **Acceptance evidence:** 48 primary scenarios/384 items (12 development, 36 locked) and 12 controls/96 locked auxiliary items; 60 canonical scenarios/480 items total. All language variants are independently validated, counterfactual/oracle and control no-change invariants pass, all 12 primary cells retain four scenarios each with one development and three locked, and controls are matched only to locked primary scenarios where feasible. Report template reuse/leakage, near duplicates, anti-shortcut feature balance, unmatched controls, exclusions, and all deviations. No item is selected or changed in response to judge behavior; no confirmatory or power claim is made.
 
-**Gate:** independent owner review accepts validation, partition integrity, provenance, label isolation, and public/private release handling before P3 uses any study items.
+**Gate:** after the eight-scenario package is reviewed, stop for a research-owner evidence review before any further P2C authoring. Independent validation, partition integrity, provenance, label isolation, and public/private release handling must be accepted before P3 uses study items.
 
 ## P3 — Judge adapters, baseline approval, reproducibility, development-only checks
 

@@ -1,6 +1,6 @@
 # Dataset and canonical-state specification
 
-**Status:** research specification amended after the 2026-10-29 research-owner audit. P1 schema and oracle infrastructure passed independent review. P2A authoring feasibility is approved; P2B-1 corrects and prepares only the same four local development prototypes. No complete study dataset or generator is included.
+**Status:** research specification amended after the 2026-10-29 research-owner audit. P1 schema and oracle infrastructure passed independent review. The four-scenario P2B feasibility pilot is concluded with documented limitations. P2C authoring is authorized for the eight remaining development primary scenarios only; no locked/control study data or frozen dataset is authorized.
 
 **Authoritative label source:** canonical task state plus the deterministic validity rule in `multilingual_judge_pilot/oracle.py`. LLM judgments and language drafts are not ground truth. P2A prototype oracle records remain local and unapproved as research data.
 
@@ -12,7 +12,7 @@
 
 ### Judge-facing identifiers and internal mapping
 
-Each future judge-facing item receives a random UUID version 4 identifier at the reviewed dataset-freeze step. The identifier must be generated independently of validity, history position, transition family, domain, language condition, partition, and template/recipe metadata. It must not encode or hash any of those fields in a decodable or inferable way. Store the UUID-to-reference mapping only in the separate, access-controlled reference path; ordinary judge records contain only the opaque UUID. No study item IDs are created during P2B-1.
+Each future judge-facing item receives a random UUID version 4 identifier at the reviewed dataset-freeze step. The identifier must be generated independently of validity, history position, transition family, domain, language condition, partition, and template/recipe metadata. It must not encode or hash any of those fields in a decodable or inferable way. Store the UUID-to-reference mapping only in the separate, access-controlled reference path; ordinary judge records contain only the opaque UUID. No judge-facing item IDs are created during development authoring.
 
 | Set | Canonical scenarios | Histories | Items | Partition plan |
 | --- | ---: | ---: | ---: | --- |
@@ -115,10 +115,10 @@ Each eventual English/MSA variant requires independent semantic validation by tw
 
 Before selecting judges for locked evaluation, run development-only basic English/MSA competence checks on separate screening material. Predefine the screen and qualification criteria; do not use locked examples or labels, study gold labels, canonical effective states, or oracle verdicts for judge selection. These checks are not part of the 480-item benchmark and do not establish task-judging reliability.
 
-No examples, translations, or records were created during P0 or P1. P2A's four local ignored prototypes are explicitly machine-assisted and unvalidated. If a later construction method uses a generative model, disclose its model, prompt, and role, then independently validate outputs; generated content never establishes its own reference label.
+No examples, translations, or records were created during P0 or P1. The four P2A development prototypes received positive semantic/linguistic ratings in the concluded feasibility pilot, while dependence classifications remained disputed and unadjudicated. They do not establish full-benchmark validity. The eight P2C development scenarios are machine-assisted drafts pending independent bilingual validation. If a later construction method uses a generative model, disclose its model, prompt, and role, then independently validate outputs; generated content never establishes its own reference label.
 
 ## Label isolation and access
 
 Store gold labels, canonical effective states, and oracle verdicts in a reference layer separated from ordinary judge inputs. Ordinary inference receives only the approved conversation, action, fixed judge instruction, and an opaque item ID. Reference scoring runs through a separate access path after the response is retained; it cannot return hidden reference data to the judge. No gold labels, canonical effective states, or oracle verdicts may enter ordinary judge prompts or development-time judge/model selection. Oracle-state access is a separately named diagnostic condition and is not an ordinary baseline.
 
-P2A's construction procedure and four-scenario preflight are specified in the [authoring protocol](authoring-protocol.md), the [prospective scenario blueprint](scenario-blueprint.md), and the [bilingual annotation protocol](bilingual-annotation-protocol.md). The [redacted preflight report](p2a-preflight-report.md) contains aggregate deterministic checks only. Actual P2A examples and their reference records are local ignored artifacts, not part of this public specification.
+P2A/P2C construction is specified in the [authoring protocol](authoring-protocol.md), the [scenario blueprint](scenario-blueprint.md), and the [bilingual annotation protocol](bilingual-annotation-protocol.md). The [P2A preflight report](p2a-preflight-report.md) and [P2B feasibility-pilot closeout](decision-records/2026-11-03-p2b-feasibility-pilot-closeout.md) contain aggregate findings only. Actual scenario texts and reference records remain local ignored artifacts, not part of this public specification.

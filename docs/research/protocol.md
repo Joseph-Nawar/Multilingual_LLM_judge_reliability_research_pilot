@@ -1,6 +1,6 @@
 # Research protocol and hypotheses
 
-**Status:** P0 specification amended after the 2026-10-29 research-owner audit; P1 has passed independent review and P2A authoring preflight is underway. The protocol is not frozen for execution.
+**Status:** P0 specification amended after the 2026-10-29 research-owner audit; P1 passed independent review; P2A authoring feasibility passed; the four-scenario P2B feasibility pilot concluded with documented limitations. The protocol is not frozen for execution, and current P2C work is limited to eight development primary scenarios.
 
 **Study type:** controlled exploratory feasibility pilot.
 
@@ -73,4 +73,4 @@ This pilot is a feasibility study over a small, controlled set of synthetic or a
 
 ## Decisions for the P0 review gate
 
-The 2026-10-29 review decisions and remaining uncertainties are recorded in [the P0 audit decision record](decision-records/2026-10-29-p0-research-audit.md). P1 implementation choices and the final P1 owner approval are recorded in [the P1 implementation decision record](decision-records/2026-10-29-p1-implementation.md). P2A is authorized for the authoring procedure and exactly four local development-only prototypes. It does not freeze this protocol, authorize locked examples or controls, or permit model inference.
+The 2026-10-29 P0 decisions and P1 implementation review are recorded in their decision records. P2A feasibility and the P2B pilot closeout are recorded separately. The four-scenario pilot's semantic/linguistic assessments and unresolved dependence disagreements are distinct findings; it does not establish full-benchmark validity. P2C currently authorizes eight additional local development-only primary scenarios. It does not freeze this protocol, authorize locked examples or controls, or permit model inference.

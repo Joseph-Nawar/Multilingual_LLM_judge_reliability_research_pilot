@@ -1,8 +1,8 @@
 # Research integrity and reproducibility
 
-These requirements govern dataset work and model evaluation. P0 and P1 created no study data and made no model calls. P2A created exactly four development prototypes; P2B-1 may correct only these same four prototypes and prepare their independent human review. Prototypes, previous versions, language drafts, coverage maps, review records, and reference data stay under ignored local `.research-data/` paths; none may be committed, pushed, or published. No additional study scenarios, locked examples, or auxiliary study controls may be authored in P2B-1.
+These requirements govern dataset work and model evaluation. P0 and P1 created no study data and made no model calls. P2A created four local development prototypes. The four-scenario P2B feasibility pilot is concluded with documented limitations, and no additional pilot review or adjudication is authorized. The eight additional P2C development primary scenarios have been authored locally for owner review. All examples, previous versions, language drafts, coverage maps, review records, and reference data stay under ignored local `.research-data/` paths; none may be committed, pushed, or published.
 
-P1 passed independent research-owner review. P2A authoring feasibility was approved at commit `3a491a29c2ba0792a509f794a167854dc7aff2c3`. P2B-1 is separately authorized for corrections and review preparation of those four development prototypes only. Prototype translations remain machine-assisted drafts, not independently validated research-language variants. P2B independent adjudication beyond this preparation, P2C, P3, P4, and P5 are not authorized by this task.
+P1 passed independent research-owner review. P2A authoring feasibility was approved at commit `3a491a29c2ba0792a509f794a167854dc7aff2c3`. The P2B pilot has complete semantic/linguistic assessment coverage for 32 variants with positive categorical results, but dependence classifications disagreed in follow-up and were not adjudicated. These findings apply only to the four development prototypes. The eight P2C development drafts are pending owner review and independent bilingual validation; locked/control authoring, dataset freeze, P3, P4, and P5 remain unauthorized.
 
 ## Reference authority and separated access
 
@@ -15,9 +15,9 @@ P1 passed independent research-owner review. P2A authoring feasibility was appro
 ## Dataset and counterfactual integrity
 
 - Preserve the 48-scenario primary consequential-change set (384 items; 12 development and 36 locked scenarios) separately from the 12-scenario no-change control (96 additional items). The control contains later restatements that leave effective meaning unchanged; its paired opposite labels arise from different initial active requirements, not an actual revision within either history.
-- Keep primary and control counts, labels, scoring, and results distinct. The research owner approved all 12 controls as locked auxiliary scenarios in the P1 authorization; P2A does not authorize authoring any control examples.
+- Keep primary and control counts, labels, scoring, and results distinct. The research owner approved all 12 controls as locked auxiliary scenarios in the P1 authorization; this P2C authorization does not permit authoring any control examples.
 - Preserve counterfactual links and assign every history, language variant, and derivative of a canonical scenario to one partition. Keep matched primary-control scenarios linked but separately identified.
-- Do not let history position predict validity in the complete study. Preserve current development-prototype labels and ordering; counterbalance future primary slots by valid-history position and complexity, and controls separately. Judge-facing IDs must be opaque and must not encode labels, history positions, conditions, domains, transition families, partitions, or template/recipe data.
+- Do not let history position predict validity in the complete study. Preserve the four original development-prototype labels and ordering; balance the twelve development scenarios six/six by valid-history position. For future primary slots, target a cross-balance with decisive-update dependence where feasible, but do not force an unresolved classification or distort an example; document shortfalls for owner review. Counterbalance controls separately. Judge-facing IDs must be opaque and must not encode labels, history positions, conditions, domains, transition families, partitions, or template/recipe data.
 - Balance valid and invalid items within each condition and approved partition. Record domain, condition, set, match, and partition in the manifest.
 - Validate all four language conditions (EN–EN, AR–AR, EN–AR, AR–EN) independently for semantic equivalence, constraint scope, chronology, action meaning, and label preservation. Apply the approved MSA and invariant-literal policy.
 - Run development-only basic English/MSA competence checks on separate screening material before judge selection. Predefine the materials and criteria; do not use locked examples or labels or study gold labels, canonical states, or oracle verdicts for selection.
@@ -62,7 +62,7 @@ Before locked evaluation, version and hash the primary/control datasets, partiti
 
 ## Model calls and cost
 
-No model calls are permitted during P0, P1, P2A, or P2B-1. This repository grants no inference budget. Future paid inference requires explicit budget authorization. A future runner must preserve the prompt, raw response, model version, token use, and execution metadata for every attempt, including failures. Language-competence screening is a separate development-only qualification procedure, not a locked evaluation or task-accuracy result.
+No model calls occurred during P0, P1, P2A, P2B, or the authorized P2C development-authoring scope. This repository grants no inference budget. Future paid inference requires explicit budget authorization. A future runner must preserve the prompt, raw response, model version, token use, and execution metadata for every attempt, including failures. Language-competence screening is a separate development-only qualification procedure, not a locked evaluation or task-accuracy result.
 
 ## Independent review and decision ownership
 

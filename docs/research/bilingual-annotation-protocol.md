@@ -1,6 +1,6 @@
 # Independent bilingual annotation protocol
 
-**Status:** The P2A annotation procedure is retained and extended for P2B-1 review preparation. No revised language draft has been independently reviewed, approved, or adjudicated.
+**Status:** The four-scenario P2B feasibility pilot is concluded with documented limitations. Its positive semantic/linguistic ratings and unresolved dependence disagreements are recorded separately. This protocol remains required for future full-study bilingual validation; no new P2C draft has been independently reviewed.
 
 ## Reviewer qualifications and separation
 
@@ -21,6 +21,8 @@ For every history-language derivative, assess both constructs independently. Do 
 **B. Whole-action dependence** retains the prior validity question: **“Can the validity of the entire agent action be determined from the decisive turn, action, and public tool contract alone, or is earlier conversation necessary?”** Record exactly one `whole_action_dependence` value: `yes`, `no`, or `unclear`, plus a separate non-empty `whole_action_dependence_rationale` identifying the requirements and turn(s) needed to assess the whole action. This includes earlier constraints unrelated to the decisive update, such as a separate permission grant.
 
 These constructs can differ. For example, a numerical update can be directly interpretable while whole-action validity depends on an earlier permission. Assess the content and formal referents; do not collapse the two answers or use either as a proxy for the other.
+
+**Pilot instruction lesson:** Follow-up responses in the P2B feasibility pilot disagreed on both constructs. Preserve the established questions and polarity: `yes` means the specified inputs are sufficient without earlier conversation; `no` means earlier conversation is necessary; `unclear` is permitted. State that decisive-update dependence concerns only the updated requirement, while whole-action dependence concerns every requirement needed to establish the validity verdict. An independently sufficient violation may establish invalidity even when other requirements appeared earlier. Require separate rationales that identify the relevant information and turn. These clarifications improve prospective instructions; they do not alter, adjudicate, or normalize prior human responses.
 
 ### Semantic relation
 
