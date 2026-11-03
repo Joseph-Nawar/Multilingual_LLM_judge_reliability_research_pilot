@@ -18,16 +18,20 @@ import time
 from typing import Callable, Mapping, Protocol, Sequence
 
 
-RUN_CONFIG_VERSION = "p3-run-config-2"
-RUN_MANIFEST_VERSION = "p3-run-manifest-2"
-JUDGE_REQUEST_VERSION = "p3-judge-request-1"
-RUN_RESULT_VERSION = "p3-run-result-3"
+RUN_CONFIG_VERSION = "p3-run-config-3"
+RUN_MANIFEST_VERSION = "p3-run-manifest-3"
+JUDGE_REQUEST_VERSION = "p3-judge-request-2"
+RUN_RESULT_VERSION = "p3-run-result-4"
 PARSER_VERSION = "p3-binary-json-verdict-1"
+STRUCTURED_PARSER_VERSION = "p3-structured-validity-1"
+BINARY_RESPONSE_CONTRACT = "binary-verdict-v1"
+STRUCTURED_RESPONSE_CONTRACT = "structured-validity-v1"
 
 
 class BaselineKind(str, Enum):
     DIRECT_MULTILINGUAL = "direct_multilingual"
     TRANSLATION_FIRST = "translation_first"
+    STRUCTURED_SINGLE_CALL = "structured_single_call"
     STRUCTURED_DECOMPOSED = "structured_decomposed"
 
 
@@ -204,7 +208,7 @@ class ConversationTurn:
         }
 
     def to_public_record(self) -> dict[str, object]:
-        return {"speaker": self.speaker, "content": self.content}
+        return {"turn_index": self.turn_index, "speaker": self.speaker, "content": self.content}
 
 
 @dataclass(frozen=True)
@@ -329,6 +333,7 @@ class JudgeRequest:
     conversation: tuple[ConversationTurn, ...]
     action: Mapping[str, object]
     public_tool_schema: Mapping[str, object]
+    response_contract_version: str = BINARY_RESPONSE_CONTRACT
     _action_json: str = field(init=False, repr=False, compare=False)
     _tool_schema_json: str = field(init=False, repr=False, compare=False)
 
@@ -348,6 +353,12 @@ class JudgeRequest:
             raise ContractError("judge request turns must be unique and chronological")
         if any(turn.turn_index >= self.action_turn_index for turn in self.conversation):
             raise ContractError("judge request turns must precede the action decision point")
+        if self.response_contract_version not in {BINARY_RESPONSE_CONTRACT, STRUCTURED_RESPONSE_CONTRACT}:
+            raise ContractError("unsupported response contract version")
+        if self.response_contract_version == STRUCTURED_RESPONSE_CONTRACT and self.baseline != BaselineKind.STRUCTURED_SINGLE_CALL.value:
+            raise ContractError("structured response contract is reserved for the single-call structured baseline")
+        if self.response_contract_version == BINARY_RESPONSE_CONTRACT and self.baseline == BaselineKind.STRUCTURED_SINGLE_CALL.value:
+            raise ContractError("single-call structured baseline requires its structured response contract")
         _check_forbidden_mapping_keys(self.action)
         _check_forbidden_mapping_keys(self.public_tool_schema)
         object.__setattr__(self, "_action_json", canonical_json(self.action))
@@ -355,6 +366,8 @@ class JudgeRequest:
 
     def to_record(self) -> dict[str, object]:
         return {
+            "response_contract_version": self.response_contract_version,
+            "response_schema": response_schema(self.response_contract_version),
             "item_id": self.item_id,
             "instruction": self.instruction,
             "conversation": [turn.to_public_record() for turn in self.conversation],
@@ -373,6 +386,7 @@ def build_judge_request(
     baseline: BaselineKind | str,
     stage_id: str,
     prompt: PromptSpec,
+    response_contract_version: str = BINARY_RESPONSE_CONTRACT,
 ) -> JudgeRequest:
     baseline_value = baseline.value if isinstance(baseline, BaselineKind) else baseline
     request_id = hashlib.sha256(f"{run_id}\0{item.item_id}\0{baseline_value}\0{stage_id}".encode("utf-8")).hexdigest()
@@ -388,7 +402,50 @@ def build_judge_request(
         conversation=item.conversation,
         action=evidence["action"],
         public_tool_schema=evidence["public_tool_schema"],
+        response_contract_version=response_contract_version,
     )
+
+
+def response_schema(contract_version: str) -> dict[str, object]:
+    """Return a fresh provider-neutral JSON Schema for the selected output contract."""
+    verdict = {"type": "string", "enum": ["valid", "invalid"]}
+    if contract_version == BINARY_RESPONSE_CONTRACT:
+        return {
+            "type": "object",
+            "properties": {"verdict": verdict},
+            "required": ["verdict"],
+            "additionalProperties": False,
+        }
+    if contract_version == STRUCTURED_RESPONSE_CONTRACT:
+        return {
+            "type": "object",
+            "properties": {
+                "tool_contract": {"type": "string", "enum": ["satisfied", "violated"]},
+                "constraint_assessments": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "constraint_type": {
+                                "type": "string",
+                                "enum": ["numerical", "temporal", "permission", "other"],
+                            },
+                            "assessment": {
+                                "type": "string",
+                                "enum": ["satisfied", "violated", "not_applicable"],
+                            },
+                            "source_turn_indices": {"type": "array", "items": {"type": "integer"}, "minItems": 1},
+                        },
+                        "required": ["constraint_type", "assessment", "source_turn_indices"],
+                        "additionalProperties": False,
+                    },
+                },
+                "verdict": verdict,
+            },
+            "required": ["tool_contract", "constraint_assessments", "verdict"],
+            "additionalProperties": False,
+        }
+    raise ContractError("unsupported response contract version")
 
 
 def _reject_duplicate_json_keys(pairs: list[tuple[str, object]]) -> dict[str, object]:
@@ -404,13 +461,49 @@ def _reject_duplicate_json_keys(pairs: list[tuple[str, object]]) -> dict[str, ob
 class ParseResult:
     status: ParseStatus
     verdict: Verdict | None = None
+    tool_contract: str | None = None
+    structured_assessments: tuple["ConstraintAssessment", ...] = ()
 
     def __post_init__(self) -> None:
         if (self.status is ParseStatus.PARSED) != (self.verdict is not None):
             raise ContractError("only parsed responses may contain a binary verdict")
+        if self.status is not ParseStatus.PARSED and (self.tool_contract is not None or self.structured_assessments):
+            raise ContractError("unparsed responses cannot contain structured assessments")
+        if self.tool_contract is None and self.structured_assessments:
+            raise ContractError("structured assessments require a tool-contract assessment")
+        if self.tool_contract not in {None, "satisfied", "violated"}:
+            raise ContractError("unsupported tool-contract assessment")
+        if any(not isinstance(row, ConstraintAssessment) for row in self.structured_assessments):
+            raise ContractError("structured assessments must be validated ConstraintAssessment records")
+        if self.tool_contract is not None:
+            has_violation = self.tool_contract == "violated" or any(
+                row.assessment == "violated" for row in self.structured_assessments
+            )
+            expected = Verdict.INVALID if has_violation else Verdict.VALID
+            if self.verdict is not expected:
+                raise ContractError("structured assessments contradict the parsed binary verdict")
 
     def to_record(self) -> dict[str, object]:
-        return {"status": self.status.value, "verdict": self.verdict.value if self.verdict else None}
+        return {
+            "status": self.status.value,
+            "verdict": self.verdict.value if self.verdict else None,
+            "tool_contract": self.tool_contract,
+            "constraint_assessments": [assessment.to_record() for assessment in self.structured_assessments],
+        }
+
+
+@dataclass(frozen=True)
+class ConstraintAssessment:
+    constraint_type: str
+    assessment: str
+    source_turn_indices: tuple[int, ...]
+
+    def to_record(self) -> dict[str, object]:
+        return {
+            "constraint_type": self.constraint_type,
+            "assessment": self.assessment,
+            "source_turn_indices": list(self.source_turn_indices),
+        }
 
 
 def parse_verdict_response(raw_response: str | None, *, provider_refused: bool = False) -> ParseResult:
@@ -436,6 +529,79 @@ def parse_verdict_response(raw_response: str | None, *, provider_refused: bool =
     except ValueError:
         return ParseResult(ParseStatus.INVALID_OUTPUT)
     return ParseResult(ParseStatus.PARSED, verdict)
+
+
+def parse_structured_verdict_response(
+    raw_response: str | None,
+    *,
+    action_turn_index: int,
+    observed_turn_indices: Sequence[int] | None = None,
+    provider_refused: bool = False,
+) -> ParseResult:
+    """Strictly parse structured assessments and enforce their binary aggregation rule."""
+    if type(action_turn_index) is not int or action_turn_index < 1:
+        raise ContractError("action_turn_index must be positive for structured verdict parsing")
+    if observed_turn_indices is None:
+        allowed_turns = set(range(action_turn_index))
+    else:
+        if any(type(index) is not int or index < 0 or index >= action_turn_index for index in observed_turn_indices):
+            raise ContractError("observed turn indices must precede the action decision point")
+        allowed_turns = set(observed_turn_indices)
+    if provider_refused:
+        return ParseResult(ParseStatus.REFUSED)
+    if raw_response is None:
+        return ParseResult(ParseStatus.MISSING)
+    try:
+        parsed = json.loads(
+            raw_response,
+            object_pairs_hook=_reject_duplicate_json_keys,
+            parse_constant=lambda value: (_ for _ in ()).throw(ValueError(f"invalid JSON constant: {value}")),
+        )
+    except (json.JSONDecodeError, ValueError, TypeError):
+        return ParseResult(ParseStatus.INVALID_OUTPUT)
+    if isinstance(parsed, dict) and set(parsed) == {"refusal"} and isinstance(parsed["refusal"], str) and parsed["refusal"].strip():
+        return ParseResult(ParseStatus.REFUSED)
+    if not isinstance(parsed, dict) or set(parsed) != {"tool_contract", "constraint_assessments", "verdict"}:
+        return ParseResult(ParseStatus.INVALID_OUTPUT)
+    if not isinstance(parsed["tool_contract"], str) or parsed["tool_contract"] not in {"satisfied", "violated"} or not isinstance(parsed["constraint_assessments"], list):
+        return ParseResult(ParseStatus.INVALID_OUTPUT)
+    try:
+        verdict = Verdict(parsed["verdict"])
+    except (ValueError, TypeError):
+        return ParseResult(ParseStatus.INVALID_OUTPUT)
+    assessments: list[ConstraintAssessment] = []
+    seen: set[tuple[str, tuple[int, ...]]] = set()
+    for row in parsed["constraint_assessments"]:
+        if not isinstance(row, dict) or set(row) != {"constraint_type", "assessment", "source_turn_indices"}:
+            return ParseResult(ParseStatus.INVALID_OUTPUT)
+        constraint_type, assessment, turn_indices = row["constraint_type"], row["assessment"], row["source_turn_indices"]
+        if not isinstance(constraint_type, str) or constraint_type not in {"numerical", "temporal", "permission", "other"}:
+            return ParseResult(ParseStatus.INVALID_OUTPUT)
+        if not isinstance(assessment, str) or assessment not in {"satisfied", "violated", "not_applicable"}:
+            return ParseResult(ParseStatus.INVALID_OUTPUT)
+        if not isinstance(turn_indices, list) or not turn_indices or any(
+            type(index) is not int or index not in allowed_turns for index in turn_indices
+        ):
+            return ParseResult(ParseStatus.INVALID_OUTPUT)
+        normalized_indices = tuple(turn_indices)
+        if len(normalized_indices) != len(set(normalized_indices)) or normalized_indices != tuple(sorted(normalized_indices)):
+            return ParseResult(ParseStatus.INVALID_OUTPUT)
+        identity = (constraint_type, normalized_indices)
+        if identity in seen:
+            return ParseResult(ParseStatus.INVALID_OUTPUT)
+        seen.add(identity)
+        assessments.append(ConstraintAssessment(constraint_type, assessment, normalized_indices))
+
+    invalid_evidence = parsed["tool_contract"] == "violated" or any(row.assessment == "violated" for row in assessments)
+    required_verdict = Verdict.INVALID if invalid_evidence else Verdict.VALID
+    if verdict is not required_verdict:
+        return ParseResult(ParseStatus.INVALID_OUTPUT)
+    return ParseResult(
+        ParseStatus.PARSED,
+        verdict,
+        tool_contract=parsed["tool_contract"],
+        structured_assessments=tuple(assessments),
+    )
 
 
 @dataclass(frozen=True)
@@ -497,6 +663,9 @@ class TranslationConfig:
             raise ContractError("unsupported translation failure policy") from exc
         object.__setattr__(self, "failure_policy", failure_policy)
         _validate_parameter_pairs(self.decoding_parameters, "translation decoding parameters")
+        from .provider_configuration import validate_provider_inference_configuration
+
+        validate_provider_inference_configuration(self.translator, self.decoding_parameters)
 
     def to_record(self) -> dict[str, object]:
         return {
@@ -542,12 +711,20 @@ class RunConfig:
         if not self.config_version.strip() or not self.parser_version.strip():
             raise ContractError("run config and parser versions are required")
         _validate_parameter_pairs(self.decoding_parameters, "decoding parameters")
+        if self.baseline == BaselineKind.STRUCTURED_SINGLE_CALL.value:
+            if self.parser_version != STRUCTURED_PARSER_VERSION:
+                raise ContractError("single-call structured baseline requires its versioned parser")
+            if self.aggregation_version != "single-structured-verdict-1":
+                raise ContractError("single-call structured baseline requires its versioned verdict rule")
         if self.baseline == BaselineKind.TRANSLATION_FIRST.value and self.translation is None:
             raise ContractError("translation-first run configuration requires translation settings")
         if self.baseline != BaselineKind.TRANSLATION_FIRST.value and self.translation is not None:
             raise ContractError("translation settings are only valid for translation-first runs")
         if self.random_seed is not None and type(self.random_seed) not in {int, str}:
             raise ContractError("random seed must be an integer, string, or absent")
+        from .provider_configuration import validate_provider_inference_configuration
+
+        validate_provider_inference_configuration(self.provider, self.decoding_parameters)
 
     def to_record(self) -> dict[str, object]:
         return {
@@ -677,6 +854,7 @@ class StepRunRecord:
     stage_id: str
     prompt_version: str
     request_json: str
+    response_contract_version: str
     attempts: tuple[AttemptRecord, ...]
     outcome: ParseResult
 
@@ -686,6 +864,7 @@ class StepRunRecord:
             "request_id": self.request_id,
             "stage_id": self.stage_id,
             "prompt_version": self.prompt_version,
+            "response_contract_version": self.response_contract_version,
             "request_json": self.request_json,
             "attempts": [attempt.to_record() for attempt in self.attempts],
             "outcome": self.outcome.to_record(),
@@ -775,6 +954,13 @@ class JudgeExecutor:
             raise ContractError("baseline plan must contain at least one judge request")
         if any(request.baseline != self.config.baseline for request in plan.requests):
             raise ContractError("judge request baseline does not match run configuration")
+        expected_contract = (
+            STRUCTURED_RESPONSE_CONTRACT
+            if self.config.baseline == BaselineKind.STRUCTURED_SINGLE_CALL.value
+            else BINARY_RESPONSE_CONTRACT
+        )
+        if any(request.response_contract_version != expected_contract for request in plan.requests):
+            raise ContractError("judge request output contract does not match its baseline")
         if any(request.item_id != plan.requests[0].item_id for request in plan.requests):
             raise ContractError("all steps in a baseline plan must refer to the same item")
         if plan.item_id != plan.requests[0].item_id:
@@ -839,7 +1025,15 @@ class JudgeExecutor:
                 break
 
             end = self.clock_ns()
-            final_result = parse_verdict_response(response.raw_response, provider_refused=response.refused)
+            if request.response_contract_version == STRUCTURED_RESPONSE_CONTRACT:
+                final_result = parse_structured_verdict_response(
+                    response.raw_response,
+                    action_turn_index=request.action_turn_index,
+                    observed_turn_indices=tuple(turn.turn_index for turn in request.conversation),
+                    provider_refused=response.refused,
+                )
+            else:
+                final_result = parse_verdict_response(response.raw_response, provider_refused=response.refused)
             attempts.append(
                 AttemptRecord(
                     execution_id=execution_id,
@@ -864,6 +1058,7 @@ class JudgeExecutor:
             request.stage_id,
             request.prompt_version,
             request_json,
+            request.response_contract_version,
             tuple(attempts),
             final_result,
         )

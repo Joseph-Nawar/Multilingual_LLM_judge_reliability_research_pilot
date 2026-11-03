@@ -70,9 +70,17 @@ Progress stops after each milestone until an evidence-based review accepts the c
 
 **Implementation record:** see [P3 infrastructure-preparation decision record](research/decision-records/2026-11-03-p3-infrastructure-preparation.md), [experimental methodology proposal](research/proposals/2026-11-03-p3-experimental-methodology-proposal-v1.md), and [versioned configuration proposals](research/proposals/p3-experimental-config-proposals-v1.json). Acceptance of the infrastructure slice and preparation package does not advance the roadmap gate for full P3.
 
+### Methodology v2 preparation (authorized for proposal and synthetic contract updates only)
+
+The research owner directed a v2 proposal around GPT-6.1 Sol, Claude Sonnet 5.5, and Gemini 3.8 Flash; direct, translation-first, and one-call structured judging; separate H2 diagnostics; a candidate English/MSA competence screen; and a recalculated three-model budget. The owner also authorized synthetic-only changes for the one-call structured output/parser and state-extraction request contracts. The existing caller-configured three-call interface remains a possible secondary experiment.
+
+The v2 package and implementation are **not** a frozen methodology or full P3 approval. Provider IDs/settings/terms, prompts, translation procedure, output and aggregation rules, competence thresholds, diagnostics, and budget remain subject to owner review. Only deterministic synthetic fixtures are used. No private study data are accessed, and no models or translators are called. Dataset freeze, spend, live inference, P4, and later work remain unauthorized.
+
+See [methodology proposal v2](research/proposals/2026-11-03-p3-experimental-methodology-proposal-v2.md), [configuration proposal v2](research/proposals/p3-experimental-config-proposals-v2.json), and [v2 preparation record](research/decision-records/2026-11-03-p3-methodology-v2-preparation.md).
+
 ### Full P3 milestone (not yet authorized)
 
-**Deliverables:** minimal judge interface/adapters; direct, translation-first, and structured/decomposed baseline procedures; translator and prompt manifests; reference-scoring separation; development-only English/MSA competence screen on separate material; development execution and analysis checks.
+**Deliverables:** minimal judge interface/adapters; direct and translation-first procedures; a one-call structured baseline as the proposed primary structured condition; optional three-call decomposition; translator and prompt manifests; reference-scoring separation; development-only English/MSA competence screen on separate material; development execution and analysis checks.
 
 **Acceptance evidence:** research owner explicitly approves the mandatory baseline set before locked evaluation. Any omitted candidate has a cost/feasibility rationale recorded before locked evaluation and unblinding. Same-backbone comparisons are used where feasible; evidence access is equivalent; prompts, translation procedures, criteria, decoding, parsers, aggregation, failure/retry rules, and analysis are frozen. Translator and judge tokens/costs are separately accounted. No method is described as a faithful published reproduction without verification. Competence-screen material and thresholds are frozen, separate from benchmark examples, and use no locked examples/labels or study gold/state/oracle data for selection. Tests confirm inference/scoring separation and preserve failures and raw outputs.
 

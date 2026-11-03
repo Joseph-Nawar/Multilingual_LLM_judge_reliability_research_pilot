@@ -88,7 +88,9 @@ def test_request_is_an_allowlist_and_rejects_reference_fields_at_any_depth():
     payload = json.loads(runtime["DirectMultilingualBaseline"](_prompt(runtime)).prepare(
         item, _config(runtime)
     ).requests[0].to_json())
-    assert set(payload) == {"item_id", "instruction", "conversation", "action", "public_tool_schema"}
+    assert set(payload) == {
+        "response_contract_version", "response_schema", "item_id", "instruction", "conversation", "action", "public_tool_schema"
+    }
     assert "language_condition" not in payload
     assert "action_turn_index" not in payload
     assert "baseline" not in payload and "stage_id" not in payload and "prompt_version" not in payload
@@ -183,7 +185,7 @@ def test_direct_baseline_retains_raw_output_usage_timing_and_cost():
     step = result.to_record()["steps"][0]
     assert step["prompt_version"] == "synthetic-test-prompt-v1"
     assert set(json.loads(step["request_json"])) == {
-        "item_id", "instruction", "conversation", "action", "public_tool_schema"
+        "response_contract_version", "response_schema", "item_id", "instruction", "conversation", "action", "public_tool_schema"
     }
     assert json.loads(result.to_json())["steps"][0]["attempts"][0]["raw_response"] == '{"verdict":"valid"}'
 

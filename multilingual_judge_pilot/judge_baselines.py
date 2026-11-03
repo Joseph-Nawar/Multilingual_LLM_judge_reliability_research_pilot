@@ -24,6 +24,8 @@ from .judge_inference import (
     RunConfig,
     TranslationConfig,
     TranslationFailurePolicy,
+    STRUCTURED_PARSER_VERSION,
+    STRUCTURED_RESPONSE_CONTRACT,
     validate_cost_usd,
     build_judge_request,
     canonical_json,
@@ -45,6 +47,18 @@ class SingleVerdictAggregator:
     def aggregate(self, results: tuple[ParseResult, ...]) -> ParseResult:
         if len(results) != 1:
             raise ContractError("single-verdict aggregation requires exactly one response")
+        return results[0]
+
+
+@dataclass(frozen=True)
+class StructuredSingleVerdictAggregator:
+    """Identity aggregation for the parser-validated one-call structured result."""
+
+    version: str = "single-structured-verdict-1"
+
+    def aggregate(self, results: tuple[ParseResult, ...]) -> ParseResult:
+        if len(results) != 1:
+            raise ContractError("single-call structured aggregation requires exactly one response")
         return results[0]
 
 
@@ -606,5 +620,36 @@ class StructuredDecomposedBaseline:
             BaselineKind.STRUCTURED_DECOMPOSED.value,
             requests,
             self.spec.aggregation,
+            item_id=item.item_id,
+        )
+
+
+@dataclass(frozen=True)
+class StructuredSingleCallBaseline:
+    """Proposed one-call evidence decomposition with a strict structured verdict."""
+
+    prompt: PromptSpec
+
+    def prepare(self, item: JudgeFacingInput, config: RunConfig) -> BaselinePlan:
+        _validate_config(
+            config,
+            BaselineKind.STRUCTURED_SINGLE_CALL,
+            self.prompt.version,
+            "single-structured-verdict-1",
+        )
+        if config.parser_version != STRUCTURED_PARSER_VERSION:
+            raise ContractError("single-call structured baseline requires its versioned parser")
+        request = build_judge_request(
+            item,
+            run_id=config.run_id,
+            baseline=BaselineKind.STRUCTURED_SINGLE_CALL,
+            stage_id="structured_validity",
+            prompt=self.prompt,
+            response_contract_version=STRUCTURED_RESPONSE_CONTRACT,
+        )
+        return BaselinePlan(
+            BaselineKind.STRUCTURED_SINGLE_CALL.value,
+            (request,),
+            StructuredSingleVerdictAggregator(),
             item_id=item.item_id,
         )
