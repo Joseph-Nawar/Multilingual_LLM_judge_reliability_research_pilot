@@ -1,6 +1,6 @@
 # Milestone roadmap
 
-Progress stops after each milestone until an evidence-based review accepts the current work and authorizes the next. The research-owner decision record is the authority for approved P0 choices and remaining questions. No milestone is authorized by Codex implementation alone.
+Progress stops after each milestone until an evidence-based review accepts the current work and authorizes the next. The research-owner decision record is the authority for approved P0 choices and remaining questions. No milestone is authorized by Codex implementation alone. A narrow exception authorizes P3 infrastructure preparation on independent synthetic fixtures in parallel with P2C human validation; it does not authorize the full P3 milestone or relax any freeze or inference gate.
 
 ## P0 — Research foundation and audit amendments (approved 2026-10-29)
 
@@ -61,6 +61,16 @@ Progress stops after each milestone until an evidence-based review accepts the c
 **Gate:** stop here. The dataset is not frozen. Independent bilingual review, quality-control and disagreement resolution, human review of duplicate/surface/template findings, research-owner acceptance of documented deviations and rendering proposals, and a separate explicit freeze authorization remain required before P3 or model inference. No judge inference or paid API call occurred during authoring.
 
 ## P3 — Judge adapters, baseline approval, reproducibility, development-only checks
+
+### Limited infrastructure-preparation exception (authorized 2026-11-03)
+
+**Authorization:** the research owner separately authorized the implementation of minimal provider-independent interfaces for direct multilingual, translation-first, and structured/decomposed judging, reproducibility records, strict parsing/failure accounting, and reference-isolation checks. Development and tests must use independent synthetic English, MSA, and code-switched fixtures only. This infrastructure slice may proceed in parallel with the two-reviewer P2C validation.
+
+**Scope limits:** deterministic mocks only; no private study examples may be loaded or inspected; no model or translator calls, paid API calls, judge selection, prompt/backbone/translator/aggregation approval, competence screen, locked evaluation, dataset freeze, or P4/P5 activity. Exact prompts, judge backbones, translation procedure, aggregation rules, and live retry policy remain research-owner decisions. This exception authorizes P3 tooling preparation only and does not signify acceptance of the complete P3 milestone.
+
+**Implementation record:** see [P3 infrastructure-preparation decision record](research/decision-records/2026-11-03-p3-infrastructure-preparation.md). Acceptance of the infrastructure slice does not advance the roadmap gate for full P3.
+
+### Full P3 milestone (not yet authorized)
 
 **Deliverables:** minimal judge interface/adapters; direct, translation-first, and structured/decomposed baseline procedures; translator and prompt manifests; reference-scoring separation; development-only English/MSA competence screen on separate material; development execution and analysis checks.
 

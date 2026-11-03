@@ -2,7 +2,7 @@
 
 This repository establishes the research foundation for a controlled feasibility study of whether LLM judges correctly classify agent actions when validity depends on user constraints introduced, revised, or revoked across English and Arabic. The object of study is the **judge**; no task-performing agent is evaluated here.
 
-The hypotheses are provisional. The study is designed to allow null and negative results. P0, P1, and P2A authoring feasibility have been approved. The four-scenario P2B feasibility pilot is concluded with documented limitations. P2C full-dataset authoring has produced the approved private inventory of 60 scenarios and 480 language items. Independent bilingual validation and research-owner acceptance remain required before dataset freeze; model inference is not authorized.
+The hypotheses are provisional. The study is designed to allow null and negative results. P0, P1, and P2A authoring feasibility have been approved. The four-scenario P2B feasibility pilot is concluded with documented limitations. P2C full-dataset authoring has produced the approved private inventory of 60 scenarios and 480 language items. Independent bilingual validation and research-owner acceptance remain required before dataset freeze. A separate owner decision authorizes limited P3 infrastructure preparation on independent synthetic fixtures only; study-example inference, paid calls, and dataset freeze remain unauthorized.
 
 ## Exploratory pilot at a glance
 
@@ -28,6 +28,10 @@ These are the authored private counts. Scenario text, reference states and label
 - [Integrity and reproducibility requirements](docs/research/integrity-and-reproducibility.md)
 - [Prior-work register](docs/research/prior-work.md)
 - [Milestone roadmap and acceptance gates](docs/roadmap.md)
+
+## Limited P3 infrastructure preparation
+
+The research owner authorized a tooling-only P3 preparation slice while P2C human validation proceeds. The provider-independent interfaces are in [`judge_inference.py`](multilingual_judge_pilot/judge_inference.py), candidate baseline preparation is in [`judge_baselines.py`](multilingual_judge_pilot/judge_baselines.py), and the oracle-state diagnostic and reference scorer use separate modules. Only deterministic mocks and original synthetic English/MSA/code-switched fixtures are included. No provider adapters, final study prompts, live translator, model calls, or study examples are part of this slice. See the [authorization and implementation record](docs/research/decision-records/2026-11-03-p3-infrastructure-preparation.md); the full P3 milestone and all inference/freeze gates remain pending.
 
 The research documents are authoritative. This README and `AGENTS.md` provide navigation and working guidance only. P0, P1, and P2A feasibility are approved. P2B's four-scenario feasibility pilot is closed; dependence disagreements remain unresolved. P2C full authoring and deterministic checks are complete. Human bilingual quality control, research-owner acceptance, and dataset freeze remain outstanding; no model inference is authorized.
 
@@ -63,4 +67,4 @@ The public reports are the [P2A preflight report](docs/research/p2a-preflight-re
 
 ## Current boundary
 
-P2C full authoring and deterministic validation are complete. Do not alter human review records, reopen pilot disagreements, freeze the dataset, proceed to P3/P4/P5, execute judge inference, or make paid API calls without separate authorization. No inference budget is authorized by this repository setup.
+P2C full authoring and deterministic validation are complete. Do not alter human review records or reopen pilot disagreements. Limited P3 infrastructure preparation is separately authorized as documented in the [roadmap](docs/roadmap.md); it does not approve the complete P3 milestone. Dataset freeze, study-example inference, paid API calls, locked evaluation, and P4/P5 activity remain unauthorized. No inference budget is authorized by this repository setup.
