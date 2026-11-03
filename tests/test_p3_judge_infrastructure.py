@@ -144,6 +144,7 @@ def test_run_manifest_serialization_and_run_id_are_deterministic_and_credential_
     assert first == config.to_manifest_json()
     payload = json.loads(first)
     assert payload["run_id"].startswith("run-")
+    assert payload["configuration_hash"] == config.config_hash
     assert payload["config"]["provider"] == {"provider_id": "mock", "model_id": "fixed-fixture-judge", "model_version": "1"}
     assert payload["config"]["retry_policy"]["version"] == "retry-policy-1"
     assert payload["config"]["aggregation_version"] == "single-binary-verdict-1"
@@ -339,6 +340,9 @@ def test_reference_scorer_is_separate_from_requests_and_preserves_unparsed_statu
     scored = score_run(result, {result.item_id: runtime["Verdict"].VALID})
     assert scored.is_correct is True
     assert scored.response_status is runtime["ParseStatus"].PARSED
+    assert scored.execution_id == result.execution_id
+    assert scored.configuration_hash == result.configuration_hash
+    assert scored.terminal_stage == "judge"
 
     invalid_output_provider = runtime["DeterministicMockProvider"](config.provider, [runtime["ProviderResponse"]("bad output")])
     invalid_output = runtime["JudgeExecutor"](config, invalid_output_provider).run(plan)

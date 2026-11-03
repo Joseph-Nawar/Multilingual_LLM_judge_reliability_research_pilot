@@ -18,10 +18,10 @@ import time
 from typing import Callable, Mapping, Protocol, Sequence
 
 
-RUN_CONFIG_VERSION = "p3-run-config-1"
-RUN_MANIFEST_VERSION = "p3-run-manifest-1"
+RUN_CONFIG_VERSION = "p3-run-config-2"
+RUN_MANIFEST_VERSION = "p3-run-manifest-2"
 JUDGE_REQUEST_VERSION = "p3-judge-request-1"
-RUN_RESULT_VERSION = "p3-run-result-1"
+RUN_RESULT_VERSION = "p3-run-result-3"
 PARSER_VERSION = "p3-binary-json-verdict-1"
 
 
@@ -42,6 +42,11 @@ class ParseStatus(str, Enum):
     MISSING = "missing"
     REFUSED = "refused"
     PROVIDER_FAILURE = "provider_failure"
+
+
+class TranslationFailurePolicy(str, Enum):
+    RECORD_AND_SKIP_JUDGE = "record_and_skip_judge"
+    RAISE_WITH_ATTEMPTS = "raise_with_attempts"
 
 
 # Alias kept descriptive at call sites that deal with provider responses.
@@ -475,13 +480,22 @@ class TranslationConfig:
     pivot_language: str
     prompt_version: str
     decoding_parameters: tuple[tuple[str, str | int | float | bool | None], ...] = ()
-    config_version: str = "translation-config-1"
+    retry_policy: RetryPolicy = RetryPolicy()
+    failure_policy: TranslationFailurePolicy = TranslationFailurePolicy.RECORD_AND_SKIP_JUDGE
+    config_version: str = "translation-config-2"
 
     def __post_init__(self) -> None:
         if self.pivot_language not in _LANGUAGES or not self.prompt_version.strip():
             raise ContractError("translation pivot language and prompt version are required")
         if not self.config_version.strip():
             raise ContractError("translation config version must be non-empty")
+        if not isinstance(self.retry_policy, RetryPolicy):
+            raise ContractError("translation retry_policy must be a RetryPolicy")
+        try:
+            failure_policy = TranslationFailurePolicy(self.failure_policy)
+        except ValueError as exc:
+            raise ContractError("unsupported translation failure policy") from exc
+        object.__setattr__(self, "failure_policy", failure_policy)
         _validate_parameter_pairs(self.decoding_parameters, "translation decoding parameters")
 
     def to_record(self) -> dict[str, object]:
@@ -491,7 +505,13 @@ class TranslationConfig:
             "prompt_version": self.prompt_version,
             "config_version": self.config_version,
             "decoding_parameters": dict(self.decoding_parameters),
+            "retry_policy": self.retry_policy.to_record(),
+            "failure_policy": self.failure_policy.value,
         }
+
+    @property
+    def config_hash(self) -> str:
+        return hashlib.sha256(canonical_json(self.to_record()).encode("utf-8")).hexdigest()
 
 
 @dataclass(frozen=True)
@@ -546,12 +566,21 @@ class RunConfig:
         }
 
     @property
+    def config_hash(self) -> str:
+        return hashlib.sha256(canonical_json(self.to_record()).encode("utf-8")).hexdigest()
+
+    @property
     def run_id(self) -> str:
-        digest = hashlib.sha256(canonical_json(self.to_record()).encode("utf-8")).hexdigest()
-        return f"run-{digest}"
+        """Stable configuration identifier; individual executions use execution_id."""
+        return f"run-{self.config_hash}"
 
     def to_manifest_record(self) -> dict[str, object]:
-        return {"manifest_version": RUN_MANIFEST_VERSION, "run_id": self.run_id, "config": self.to_record()}
+        return {
+            "manifest_version": RUN_MANIFEST_VERSION,
+            "run_id": self.run_id,
+            "configuration_hash": self.config_hash,
+            "config": self.to_record(),
+        }
 
     def to_manifest_json(self) -> str:
         return canonical_json(self.to_manifest_record())
@@ -609,6 +638,8 @@ class DeterministicMockProvider:
 
 @dataclass(frozen=True)
 class AttemptRecord:
+    execution_id: str
+    attempt_id: str
     attempt_number: int
     call_status: str
     raw_response: str | None
@@ -623,6 +654,9 @@ class AttemptRecord:
 
     def to_record(self) -> dict[str, object]:
         return {
+            "record_version": "p3-attempt-record-2",
+            "execution_id": self.execution_id,
+            "attempt_id": self.attempt_id,
             "attempt_number": self.attempt_number,
             "call_status": self.call_status,
             "raw_response": self.raw_response,
@@ -661,21 +695,29 @@ class StepRunRecord:
 @dataclass(frozen=True)
 class RunResult:
     run_id: str
+    configuration_hash: str
+    execution_id: str
+    terminal_stage: str
     item_id: str
     baseline: str
     aggregation_version: str
     steps: tuple[StepRunRecord, ...]
     translation_records: tuple[object, ...]
+    translation_attempts: tuple[object, ...]
     final_result: ParseResult
 
     def to_record(self) -> dict[str, object]:
         return {
             "result_version": RUN_RESULT_VERSION,
             "run_id": self.run_id,
+            "configuration_hash": self.configuration_hash,
+            "execution_id": self.execution_id,
+            "terminal_stage": self.terminal_stage,
             "item_id": self.item_id,
             "baseline": self.baseline,
             "aggregation_version": self.aggregation_version,
             "translation_records": [record.to_record() for record in self.translation_records],
+            "translation_attempts": [attempt.to_record() for attempt in self.translation_attempts],
             "steps": [step.to_record() for step in self.steps],
             "final_result": self.final_result.to_record(),
         }
@@ -709,32 +751,54 @@ class JudgeExecutor:
             raise ContractError("baseline plan does not match run configuration")
         if plan.aggregation_version != self.config.aggregation_version:
             raise ContractError("baseline aggregation does not match run configuration")
-        if self.config.baseline == BaselineKind.TRANSLATION_FIRST.value and not plan.translation_records:
-            raise ContractError("translation-first plan must retain translation provenance")
-        if self.config.baseline != BaselineKind.TRANSLATION_FIRST.value and plan.translation_records:
+        if self.config.baseline == BaselineKind.TRANSLATION_FIRST.value and not plan.translation_attempts:
+            raise ContractError("translation-first plan must retain translation attempt records")
+        if self.config.baseline != BaselineKind.TRANSLATION_FIRST.value and (plan.translation_records or plan.translation_attempts):
             raise ContractError("translation provenance is only valid for translation-first plans")
+        if plan.preprocessing_result is not None:
+            if plan.requests or plan.preprocessing_result.status is ParseStatus.PARSED:
+                raise ContractError("failed preprocessing must skip judge requests and remain unparsed")
+            return RunResult(
+                run_id=self.config.run_id,
+                configuration_hash=self.config.config_hash,
+                execution_id=plan.execution_id,
+                terminal_stage="translation",
+                item_id=plan.item_id,
+                baseline=self.config.baseline,
+                aggregation_version=plan.aggregation_version,
+                steps=(),
+                translation_records=plan.translation_records,
+                translation_attempts=plan.translation_attempts,
+                final_result=plan.preprocessing_result,
+            )
         if not plan.requests:
             raise ContractError("baseline plan must contain at least one judge request")
         if any(request.baseline != self.config.baseline for request in plan.requests):
             raise ContractError("judge request baseline does not match run configuration")
         if any(request.item_id != plan.requests[0].item_id for request in plan.requests):
             raise ContractError("all steps in a baseline plan must refer to the same item")
+        if plan.item_id != plan.requests[0].item_id:
+            raise ContractError("baseline plan item ID does not match its judge requests")
 
-        steps = tuple(self._run_request(request) for request in plan.requests)
+        steps = tuple(self._run_request(request, execution_id=plan.execution_id) for request in plan.requests)
         final = plan.aggregate(tuple(step.outcome for step in steps))
         if not isinstance(final, ParseResult):
             raise ContractError("baseline aggregation must return a ParseResult without coercion")
         return RunResult(
             run_id=self.config.run_id,
+            configuration_hash=self.config.config_hash,
+            execution_id=plan.execution_id,
+            terminal_stage="judge",
             item_id=plan.requests[0].item_id,
             baseline=self.config.baseline,
             aggregation_version=plan.aggregation_version,
             steps=steps,
             translation_records=plan.translation_records,
+            translation_attempts=plan.translation_attempts,
             final_result=final,
         )
 
-    def _run_request(self, request: JudgeRequest) -> StepRunRecord:
+    def _run_request(self, request: JudgeRequest, *, execution_id: str) -> StepRunRecord:
         attempts: list[AttemptRecord] = []
         final_result = ParseResult(ParseStatus.PROVIDER_FAILURE)
         policy = self.config.retry_policy
@@ -749,8 +813,19 @@ class JudgeExecutor:
                 code = exc.code if isinstance(exc, ProviderCallError) else type(exc).__name__
                 attempts.append(
                     AttemptRecord(
-                        attempt_number, "provider_failure", None, None, None,
-                        max(0, end - start) / 1_000_000, None, None, None, None, code,
+                        execution_id=execution_id,
+                        attempt_id=f"{execution_id}:{request.request_id}:{attempt_number}",
+                        attempt_number=attempt_number,
+                        call_status="provider_failure",
+                        raw_response=None,
+                        parse_status=None,
+                        verdict=None,
+                        latency_ms=max(0, end - start) / 1_000_000,
+                        prompt_tokens=None,
+                        completion_tokens=None,
+                        cost_usd=None,
+                        provider_refused=None,
+                        failure_code=code,
                     )
                 )
                 should_retry = (
@@ -767,17 +842,19 @@ class JudgeExecutor:
             final_result = parse_verdict_response(response.raw_response, provider_refused=response.refused)
             attempts.append(
                 AttemptRecord(
-                    attempt_number,
-                    "response_received",
-                    response.raw_response,
-                    final_result.status,
-                    final_result.verdict,
-                    max(0, end - start) / 1_000_000,
-                    response.prompt_tokens,
-                    response.completion_tokens,
-                    response.cost_usd,
-                    response.refused,
-                    None,
+                    execution_id=execution_id,
+                    attempt_id=f"{execution_id}:{request.request_id}:{attempt_number}",
+                    attempt_number=attempt_number,
+                    call_status="response_received",
+                    raw_response=response.raw_response,
+                    parse_status=final_result.status,
+                    verdict=final_result.verdict,
+                    latency_ms=max(0, end - start) / 1_000_000,
+                    prompt_tokens=response.prompt_tokens,
+                    completion_tokens=response.completion_tokens,
+                    cost_usd=response.cost_usd,
+                    provider_refused=response.refused,
+                    failure_code=None,
                 )
             )
             # Parse failures and refusals are retained as outcomes; only configured provider errors retry.

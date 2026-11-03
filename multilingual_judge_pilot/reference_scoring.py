@@ -11,6 +11,9 @@ from .judge_inference import ParseStatus, RunResult, Verdict
 @dataclass(frozen=True)
 class ScoredRun:
     run_id: str
+    configuration_hash: str
+    execution_id: str
+    terminal_stage: str
     item_id: str
     response_status: ParseStatus
     predicted_verdict: Verdict | None
@@ -35,6 +38,9 @@ def score_run(run: RunResult, reference_labels: Mapping[str, Verdict]) -> Scored
     correct = predicted is reference if run.final_result.status is ParseStatus.PARSED else None
     return ScoredRun(
         run_id=run.run_id,
+        configuration_hash=run.configuration_hash,
+        execution_id=run.execution_id,
+        terminal_stage=run.terminal_stage,
         item_id=run.item_id,
         response_status=run.final_result.status,
         predicted_verdict=predicted,
