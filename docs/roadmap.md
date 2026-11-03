@@ -8,7 +8,7 @@ Progress stops after each milestone until an evidence-based review accepts the c
 
 **Acceptance evidence:** primary design remains 48 scenarios, 96 histories, 384 items, with 12 development and 36 locked primary scenarios; separate no-change control is 12 scenarios and 96 items; all planned counts and splits are consistently documented; H1–H3 remain hypotheses; language, baseline, oracle, template, and data-access rules are explicit; audit decisions and deferrals have milestones; structural checks pass. No generator, dataset, inference runner, or model call exists.
 
-**Gate:** P0 was approved, followed by P1 and P2A approval. The P2B feasibility pilot is concluded with limitations. The current P2C authorization covers only the eight development primary scenarios needed to complete the 12-scenario development set; it does not authorize locked examples, study controls, dataset freeze, or model inference.
+**Gate:** P0 was approved, followed by P1 and P2A approval. The P2B feasibility pilot is concluded with limitations. A later owner decision authorized P2C full-dataset authoring and deterministic validation; this still does not authorize dataset freeze or model inference.
 
 ## P1 — Canonical schema, counterfactuals, deterministic oracle, integrity tests (approved)
 
@@ -42,19 +42,23 @@ Progress stops after each milestone until an evidence-based review accepts the c
 
 **Disposition:** no more review of these four pilot scenarios is authorized. Dependence disagreements remain unresolved. Full-study bilingual validation of future dataset variants remains a distinct required gate before any dataset freeze or evaluation; the concluded pilot is not reopened to satisfy that gate.
 
-## P2C — Development-scenario authoring (eight scenarios authorized)
+## P2C-Development — Development-scenario authoring (completed)
 
-**Current authorized deliverables:** author the eight remaining development primary scenarios in the eight uncovered domain × transition-family cells, with two formal histories and four language conditions per history; retain canonical-state-first authoring, provenance, semantic-coverage links, deterministic oracle checks, position counterbalancing, and private-data isolation. Combined with four existing pilot prototypes, the development set contains 12 primary scenarios and 96 derived items.
+**Completed deliverables:** the eight authorized development primary scenarios were authored in the eight uncovered domain × transition-family cells, with two formal histories and four language conditions per history. Combined with four existing pilot prototypes, the development set contains 12 primary scenarios and 96 derived items.
 
 **Acceptance evidence for this authorized scope:** all 12 primary cells are represented once in development; every scenario has two histories, each with four conditions; the deterministic oracle establishes opposite labels for the same well-formed action; structural chronology and semantic-coverage checks pass; valid-history position is balanced 6/6 across the 12 scenarios; duplicate checks report exact/normalized results and template/recipe reuse; no development language draft is mislabeled as human validated. All new data remain local and ignored.
 
-**Not authorized by this scope:** the 36 locked primary scenarios, 12 locked auxiliary controls, partition freeze, release, model selection or inference. These require a separate review and authorization.
+**Disposition:** the eight development scenarios completed the authorized development milestone. The original development records and all pilot evidence remain preserved.
 
-**Future P2C deliverables (not started):** complete the 48-scenario primary set and separately identified 12-scenario auxiliary controls; prepare partition manifests, match/template/recipe inventories, provenance, exclusion ledger, hashes, and release review package.
+## P2C-Full — Full dataset authoring and validation-package preparation (authoring complete)
 
-**Acceptance evidence:** 48 primary scenarios/384 items (12 development, 36 locked) and 12 controls/96 locked auxiliary items; 60 canonical scenarios/480 items total. All language variants are independently validated, counterfactual/oracle and control no-change invariants pass, all 12 primary cells retain four scenarios each with one development and three locked, and controls are matched only to locked primary scenarios where feasible. Report template reuse/leakage, near duplicates, anti-shortcut feature balance, unmatched controls, exclusions, and all deviations. No item is selected or changed in response to judge behavior; no confirmatory or power claim is made.
+**Completed deliverables:** 36 locked primary scenarios and 12 locked auxiliary no-change controls, combined with the 12 preserved development primaries. The private package contains 60 canonical scenarios, 120 counterfactual histories, and 480 language items; it includes formal-state-first specifications, action/tool contracts, four language conditions per history, semantic-coverage mappings, provisional author-side dependence assessments, provenance, template/recipe inventories, duplicate and surface-risk audits, partition/control-match manifests, exclusion/revision ledgers, hashes, and consolidated review materials.
 
-**Gate:** after the eight-scenario package is reviewed, stop for a research-owner evidence review before any further P2C authoring. Independent validation, partition integrity, provenance, label isolation, and public/private release handling must be accepted before P3 uses study items.
+**Deterministic evidence:** all 12 primary cells contain four scenarios (one development, three locked); all 60 counterfactual pairs have opposite deterministic labels for their shared action; all 28 control restatements preserve effective state; and all four language conditions cover every history. Valid-history positions are balanced 6/6 in development, 18/18 in locked primary scenarios, and 6/6 in controls. Control matching records 9 full and 3 partial permission-scope matches. No exact or normalized duplicate groups were found; lexical screening flagged 24 candidate pairs (12 declared control-match overlaps, 12 other candidates) and one potential surface-feature shortcut. Machine checks do not adjudicate semantic duplicates, linguistic equivalence, or naturalness. The target 24/24 complexity split is not claimed; the deviation is documented without forcing categories.
+
+**Human review package:** two hash-bound reviewer slots cover 56 scenarios and 448 variants. The four scenarios and 32 variants already covered in the concluded P2B feasibility pilot are excluded from new review tasks; their annotations remain unchanged. No new reviewer responses have been submitted, and no new bilingual validation is claimed.
+
+**Gate:** stop here. The dataset is not frozen. Independent bilingual review, quality-control and disagreement resolution, human review of duplicate/surface/template findings, research-owner acceptance of documented deviations and rendering proposals, and a separate explicit freeze authorization remain required before P3 or model inference. No judge inference or paid API call occurred during authoring.
 
 ## P3 — Judge adapters, baseline approval, reproducibility, development-only checks
 

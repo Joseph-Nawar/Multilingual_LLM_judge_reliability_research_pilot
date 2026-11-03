@@ -1,6 +1,6 @@
 # Research protocol and hypotheses
 
-**Status:** P0 specification amended after the 2026-10-29 research-owner audit; P1 passed independent review; P2A authoring feasibility passed; the four-scenario P2B feasibility pilot concluded with documented limitations. The protocol is not frozen for execution, and current P2C work is limited to eight development primary scenarios.
+**Status:** P0 specification amended after the 2026-10-29 research-owner audit; P1 passed independent review; P2A authoring feasibility passed; the four-scenario P2B feasibility pilot concluded with documented limitations. P2C authoring of the full 60-scenario corpus and deterministic package checks are complete under the later owner authorization. The protocol and dataset remain unfrozen; independent bilingual quality control and owner acceptance are outstanding.
 
 **Study type:** controlled exploratory feasibility pilot.
 
@@ -50,7 +50,7 @@ Report all four conditions separately, alongside any clearly labeled exploratory
 
 ## Ground truth and label isolation
 
-The canonical task state and deterministic, executable validity rule are authoritative. The P1 oracle applies only typed formal events and constraints; it never interprets conversation text. The rule resolves which constraints are active at action time, including supersession, revocation, numerical bounds, and temporal conditions. For no-change controls, it verifies that a formal restatement leaves the effective state unchanged. P2A structural coverage is a span-link check only; natural-language semantic equivalence remains for independent bilingual validation in P2B. LLM output is never a label source.
+The canonical task state and deterministic, executable validity rule are authoritative. The P1 oracle applies only typed formal events and constraints; it never interprets conversation text. The rule resolves which constraints are active at action time, including supersession, revocation, numerical bounds, and temporal conditions. For no-change controls, it verifies that a formal restatement leaves the effective state unchanged. Structural coverage is a span-link check only; natural-language semantic equivalence remains for independent bilingual validation before freeze. LLM output is never a label source.
 
 Ordinary judge inference and reference scoring use separated data-access paths. The ordinary judge receives the conversation and action needed for evaluation, but not gold labels, canonical effective states, oracle verdicts, or pairing keys. These materials are also excluded from development-time judge/model selection. The reference scorer consumes the response and opaque item ID through a separate path and cannot supply hidden references back to the judge. Any intervention that exposes canonical effective state is a separately named oracle diagnostic; it is not a fair deployable baseline and is excluded from ordinary-condition summaries.
 
@@ -73,4 +73,4 @@ This pilot is a feasibility study over a small, controlled set of synthetic or a
 
 ## Decisions for the P0 review gate
 
-The 2026-10-29 P0 decisions and P1 implementation review are recorded in their decision records. P2A feasibility and the P2B pilot closeout are recorded separately. The four-scenario pilot's semantic/linguistic assessments and unresolved dependence disagreements are distinct findings; it does not establish full-benchmark validity. P2C currently authorizes eight additional local development-only primary scenarios. It does not freeze this protocol, authorize locked examples or controls, or permit model inference.
+The 2026-10-29 P0 decisions and P1 implementation review are recorded in their decision records. P2A feasibility and the P2B pilot closeout are recorded separately. The four-scenario pilot's semantic/linguistic assessments and unresolved dependence disagreements are distinct findings; it does not establish full-benchmark validity. The later P2C authorization permitted full dataset authoring and deterministic validation. The resulting 60 canonical scenarios, 120 histories, and 480 language items remain private. New P2C language variants await independent bilingual validation; the four previously pilot-reviewed scenarios retain their original assessments and unresolved dependence records. This authorization did not freeze the dataset or permit model inference.
