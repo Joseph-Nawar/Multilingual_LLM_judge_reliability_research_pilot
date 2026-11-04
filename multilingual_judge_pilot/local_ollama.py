@@ -40,6 +40,7 @@ APPROVED_OLLAMA_TAGS = frozenset(
         "translategemma:4b-it-q4_K_M",
     }
 )
+DIAGNOSTIC_OLLAMA_TAGS = frozenset({"qwen3:4b-instruct-2507-q4_K_M"})
 TRANSLATEGEMMA_PROMPT_VERSION = "translategemma-ollama-official-prompt-literal-shield-v1"
 
 
@@ -61,10 +62,12 @@ class OllamaModelDescriptor:
     capabilities: tuple[str, ...]
     template: str
     parameters: str
+    diagnostic_only: bool = False
 
     def __post_init__(self) -> None:
-        if self.model_tag not in APPROVED_OLLAMA_TAGS:
-            raise ContractError("model tag is not on the approved local shortlist")
+        if type(self.diagnostic_only) is not bool:
+            raise ContractError("diagnostic_only must be a boolean")
+        _approved_model_tag(self.model_tag, diagnostic_only=self.diagnostic_only)
         digest = self.digest.removeprefix("sha256:")
         if not re.fullmatch(r"[0-9a-f]{64}", digest):
             raise ContractError("Ollama model digest must be a full SHA-256 hex digest")
@@ -100,6 +103,7 @@ class OllamaModelDescriptor:
             "context_length": self.context_length,
             "template": self.template,
             "parameters": self.parameters,
+            "diagnostic_only": self.diagnostic_only,
         }
 
 
@@ -159,9 +163,8 @@ class OllamaLocalClient:
     def get_version(self) -> dict[str, object]:
         return self._json_request("GET", "/api/version")
 
-    def discover_model(self, model_tag: str) -> OllamaModelDescriptor:
-        if model_tag not in APPROVED_OLLAMA_TAGS:
-            raise ContractError("model tag is not on the approved local shortlist")
+    def discover_model(self, model_tag: str, *, diagnostic_only: bool = False) -> OllamaModelDescriptor:
+        _approved_model_tag(model_tag, diagnostic_only=diagnostic_only)
         tags = self._json_request("GET", "/api/tags")
         models = tags.get("models")
         if not isinstance(models, list):
@@ -194,15 +197,21 @@ class OllamaLocalClient:
             capabilities=tuple(capabilities),
             template=shown.get("template", "") if isinstance(shown.get("template", ""), str) else "",
             parameters=shown.get("parameters", "") if isinstance(shown.get("parameters", ""), str) else "",
+            diagnostic_only=diagnostic_only,
         )
 
     def chat(self, payload: Mapping[str, object]) -> dict[str, object]:
         return self._json_request("POST", "/api/chat", payload)
 
 
-def _approved_model_tag(tag: str) -> None:
-    if tag not in APPROVED_OLLAMA_TAGS:
-        raise ContractError("only the three research-owner-approved Ollama tags are allowed")
+def _approved_model_tag(tag: str, *, diagnostic_only: bool = False) -> None:
+    if type(diagnostic_only) is not bool:
+        raise ContractError("diagnostic_only must be a boolean")
+    if diagnostic_only:
+        if tag not in DIAGNOSTIC_OLLAMA_TAGS:
+            raise ContractError("diagnostic-only mode accepts only the specifically authorized diagnostic model")
+    elif tag not in APPROVED_OLLAMA_TAGS:
+        raise ContractError("model tag is not on the approved local shortlist")
 
 
 def _request_options(parameters: Mapping[str, object], descriptor: OllamaModelDescriptor) -> tuple[dict[str, object], bool | None]:
@@ -238,13 +247,14 @@ def _request_options(parameters: Mapping[str, object], descriptor: OllamaModelDe
 class OllamaLocalJudgeProvider:
     """Provider-independent judge protocol backed only by a local Ollama model."""
 
-    def __init__(self, client: OllamaLocalClient, model_tag: str):
-        _approved_model_tag(model_tag)
+    def __init__(self, client: OllamaLocalClient, model_tag: str, *, diagnostic_only: bool = False):
+        _approved_model_tag(model_tag, diagnostic_only=diagnostic_only)
         if not isinstance(getattr(client, "base_url", None), str) or not client.base_url.startswith("http://127.0.0.1:"):
             raise ContractError("local judge client must use the loopback Ollama endpoint")
         self.client = client
-        self.descriptor = client.discover_model(model_tag)
-        self._identity = ProviderIdentity("ollama-local", model_tag, self.descriptor.digest)
+        self.descriptor = client.discover_model(model_tag, diagnostic_only=diagnostic_only)
+        provider_id = "ollama-local-diagnostic" if diagnostic_only else "ollama-local"
+        self._identity = ProviderIdentity(provider_id, model_tag, self.descriptor.digest)
 
     @property
     def identity(self) -> ProviderIdentity:

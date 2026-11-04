@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from hashlib import sha256
+import argparse
 import atexit
 import json
 from pathlib import Path
@@ -269,7 +270,23 @@ def _model_generation_rate(result_record: dict[str, object]) -> float | None:
     return rates[0] if rates else None
 
 
-def main() -> int:
+def _parse_args(argv: list[str] | None = None):
+    parser = argparse.ArgumentParser(description="Run a bounded synthetic-only local Ollama compatibility smoke.")
+    parser.add_argument(
+        "--model-tag", action="append", choices=MODEL_TAGS, dest="model_tags",
+        help="Judge candidate to test; may be repeated. Defaults to both approved candidates.",
+    )
+    parser.add_argument(
+        "--skip-translation", action="store_true",
+        help="Run judge baselines only when TranslateGemma is not installed; translation-first is explicitly omitted.",
+    )
+    args = parser.parse_args(argv)
+    args.model_tags = args.model_tags or list(MODEL_TAGS)
+    return args
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = _parse_args(argv)
     output_dir = ROOT / ".research-data" / "p3-local-smoke"
     output_dir.mkdir(parents=True, exist_ok=True)
     file_path = output_dir / f"synthetic-local-smoke-{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}.json"
@@ -293,7 +310,7 @@ def main() -> int:
         {"case_id": case, "condition": condition, **item.evidence_record()} for case, condition, item in rows
     ]).encode("utf-8")).hexdigest()
     output: dict[str, object] = {
-        "record_version": "p3-local-compatibility-smoke-1",
+        "record_version": "p3-local-compatibility-smoke-2",
         "scope": "independent synthetic fixtures only; not screening, evaluation, or model selection",
         "endpoint": OLLAMA_DEFAULT_BASE_URL,
         "ollama_version": ollama_version,
@@ -303,7 +320,7 @@ def main() -> int:
         "initial_system_snapshot": start_state,
         "record_path": str(file_path),
         "model_descriptors": [],
-        "translation": {"attempts": [], "artifacts": {}},
+        "translation": {"status": "skipped_by_option" if args.skip_translation else "pending", "attempts": [], "artifacts": {}},
         "judge_runs": [],
         "context_8192_probes": [],
         "model_summaries": {},
@@ -311,59 +328,64 @@ def main() -> int:
     }
     checkpoint(output)
 
-    translator = OllamaLocalTranslator(client, TRANSLATOR_TAG)
-    translator_descriptor = translator.descriptor
-    output["translator_descriptor"] = translator_descriptor.to_record()
-    translation_config = TranslationConfig(
-        translator=translator.identity,
-        pivot_language="en",
-        prompt_version=TRANSLATEGEMMA_PROMPT_VERSION,
-        decoding_parameters=(("num_ctx", 4096), ("num_predict", 512), ("seed", 17), ("temperature", 0.0)),
-    )
+    translator = None
+    translator_descriptor = None
+    translation_config = None
     artifacts: dict[str, TranslationArtifact] = {}
     translation_attempts_by_item: dict[str, tuple[object, ...]] = {}
-    first_tag = MODEL_TAGS[0]
-    artifact_provider = OllamaLocalJudgeProvider(client, first_tag)
-    translation_run_config = _make_run_config(
-        artifact_provider,
-        BaselineKind.TRANSLATION_FIRST.value,
-        prompt_version=DIRECT_PROMPT.version,
-        input_hash=synthetic_manifest,
-        decoding={"num_ctx": 4096, "num_predict": 64, "seed": 17, "temperature": 0.0, **({"think": False} if "thinking" in artifact_provider.descriptor.capabilities else {})},
-        translation=translation_config,
-    )
-    translation_baseline = TranslationFirstBaseline(DIRECT_PROMPT, translator)
-    for case_id, condition, item in rows:
-        plan = translation_baseline.prepare(item, translation_run_config)
-        translation_attempts_by_item[item.item_id] = plan.translation_attempts
-        record = {
-            "case_id": case_id,
-            "condition": condition,
-            "item_id": item.item_id,
-            "turn_shape": [{"turn_index": turn.turn_index, "speaker": turn.speaker, "language": turn.language} for turn in item.conversation],
-            "translation_attempts": [attempt.to_record() for attempt in plan.translation_attempts],
-            "translation_records": [record.to_record() for record in plan.translation_records],
-            "preprocessing_status": plan.preprocessing_result.status.value if plan.preprocessing_result else "translated",
-        }
-        if plan.requests:
-            artifact = TranslationArtifact.from_plan(item, translation_run_config, plan)
-            artifacts[item.item_id] = artifact
-            output["translation"]["artifacts"][item.item_id] = artifact.to_record()
-            record["translation_artifact_sha256"] = artifact.artifact_sha256
-            record["translated_turns"] = [turn.to_record() for turn in artifact.translated_turns]
-        output["translation"]["attempts"].append(record)
+    translation_run_config = None
+    if not args.skip_translation:
+        translator = OllamaLocalTranslator(client, TRANSLATOR_TAG)
+        translator_descriptor = translator.descriptor
+        output["translator_descriptor"] = translator_descriptor.to_record()
+        translation_config = TranslationConfig(
+            translator=translator.identity,
+            pivot_language="en",
+            prompt_version=TRANSLATEGEMMA_PROMPT_VERSION,
+            decoding_parameters=(("num_ctx", 4096), ("num_predict", 512), ("seed", 17), ("temperature", 0.0)),
+        )
+        artifact_provider = OllamaLocalJudgeProvider(client, args.model_tags[0])
+        translation_run_config = _make_run_config(
+            artifact_provider,
+            BaselineKind.TRANSLATION_FIRST.value,
+            prompt_version=DIRECT_PROMPT.version,
+            input_hash=synthetic_manifest,
+            decoding={"num_ctx": 4096, "num_predict": 64, "seed": 17, "temperature": 0.0, **({"think": False} if "thinking" in artifact_provider.descriptor.capabilities else {})},
+            translation=translation_config,
+        )
+        translation_baseline = TranslationFirstBaseline(DIRECT_PROMPT, translator)
+        for case_id, condition, item in rows:
+            plan = translation_baseline.prepare(item, translation_run_config)
+            translation_attempts_by_item[item.item_id] = plan.translation_attempts
+            record = {
+                "case_id": case_id,
+                "condition": condition,
+                "item_id": item.item_id,
+                "turn_shape": [{"turn_index": turn.turn_index, "speaker": turn.speaker, "language": turn.language} for turn in item.conversation],
+                "translation_attempts": [attempt.to_record() for attempt in plan.translation_attempts],
+                "translation_records": [record.to_record() for record in plan.translation_records],
+                "preprocessing_status": plan.preprocessing_result.status.value if plan.preprocessing_result else "translated",
+            }
+            if plan.requests:
+                artifact = TranslationArtifact.from_plan(item, translation_run_config, plan)
+                artifacts[item.item_id] = artifact
+                output["translation"]["artifacts"][item.item_id] = artifact.to_record()
+                record["translation_artifact_sha256"] = artifact.artifact_sha256
+                record["translated_turns"] = [turn.to_record() for turn in artifact.translated_turns]
+            output["translation"]["attempts"].append(record)
+            checkpoint(output)
+        output["translation"]["status"] = "completed"
+        output["translation"]["unique_artifacts"] = len(artifacts)
+        output["translation"]["provider_call_count"] = sum(
+            len(attempt.get("provider_call_records", []))
+            for row in output["translation"]["attempts"]
+            for attempt in row["translation_attempts"]
+        )
         checkpoint(output)
-    output["translation"]["unique_artifacts"] = len(artifacts)
-    output["translation"]["provider_call_count"] = sum(
-        len(attempt.get("provider_call_records", []))
-        for row in output["translation"]["attempts"]
-        for attempt in row["translation_attempts"]
-    )
-    checkpoint(output)
-    output["model_unload_checks"].append(_stop_model(TRANSLATOR_TAG))
-    checkpoint(output)
+        output["model_unload_checks"].append(_stop_model(TRANSLATOR_TAG))
+        checkpoint(output)
 
-    for model_tag in MODEL_TAGS:
+    for model_tag in args.model_tags:
         provider = OllamaLocalJudgeProvider(client, model_tag)
         descriptor = provider.descriptor
         output["model_descriptors"].append(descriptor.to_record())
@@ -422,6 +444,9 @@ def main() -> int:
             output["judge_runs"].append(structured_record)
             checkpoint(output)
 
+            if args.skip_translation:
+                continue
+
             artifact = artifacts.get(item.item_id)
             if artifact is None:
                 skipped_record = {
@@ -433,6 +458,7 @@ def main() -> int:
                 output["judge_runs"].append(skipped_record)
                 checkpoint(output)
                 continue
+            assert translation_config is not None and translator is not None
             translation_config_for_judge = TranslationConfig(
                 translator=translator.identity,
                 pivot_language="en",
@@ -523,9 +549,9 @@ def main() -> int:
         "record_sha256": record_sha256,
         "synthetic_fixture_sha256": synthetic_manifest,
         "ollama_version": ollama_version,
-        "installed_models": [entry["model_tag"] for entry in output["model_descriptors"]] + [translator_descriptor.model_tag],
-        "translation_unique_artifacts": output["translation"]["unique_artifacts"],
-        "translation_provider_calls": output["translation"]["provider_call_count"],
+        "installed_models": [entry["model_tag"] for entry in output["model_descriptors"]] + ([translator_descriptor.model_tag] if translator_descriptor else []),
+        "translation_unique_artifacts": output["translation"].get("unique_artifacts", 0),
+        "translation_provider_calls": output["translation"].get("provider_call_count", 0),
         "judge_runs": len(output["judge_runs"]),
         "model_summaries": output["model_summaries"],
     }))

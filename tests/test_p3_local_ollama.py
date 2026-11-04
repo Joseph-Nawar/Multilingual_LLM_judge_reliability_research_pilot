@@ -40,8 +40,9 @@ class _FakeClient:
         self.responses = list(responses)
         self.requests = []
 
-    def discover_model(self, model_tag):
+    def discover_model(self, model_tag, *, diagnostic_only=False):
         assert model_tag == self.descriptor.model_tag
+        assert diagnostic_only == self.descriptor.diagnostic_only
         return self.descriptor
 
     def chat(self, payload):
@@ -59,6 +60,53 @@ def test_ollama_client_rejects_remote_and_non_loopback_endpoints():
     with pytest.raises(ValueError, match="127.0.0.1"):
         module["OllamaLocalClient"]("http://localhost:11434")
     assert module["OLLAMA_DEFAULT_BASE_URL"] == "http://127.0.0.1:11434"
+
+
+def test_diagnostic_qwen_requires_explicit_mode_and_never_enters_candidate_shortlist():
+    module = _ollama_module()
+    from multilingual_judge_pilot.local_ollama import APPROVED_OLLAMA_TAGS
+
+    diagnostic_tag = "qwen3:4b-instruct-2507-q4_K_M"
+    descriptor = module["OllamaModelDescriptor"](
+        model_tag=diagnostic_tag,
+        digest="sha256:" + "b" * 64,
+        size_bytes=2_500_000_000,
+        details={"format": "gguf", "family": "qwen3", "parameter_size": "4.0B", "quantization_level": "Q4_K_M", "context_length": 262144},
+        capabilities=("completion", "thinking"),
+        template="{{ .System }}\n{{ .Prompt }}",
+        parameters="num_ctx 4096",
+        diagnostic_only=True,
+    )
+    assert diagnostic_tag not in APPROVED_OLLAMA_TAGS
+    with pytest.raises(ValueError, match="approved local shortlist"):
+        module["OllamaModelDescriptor"](
+            model_tag=diagnostic_tag,
+            digest="sha256:" + "b" * 64,
+            size_bytes=2_500_000_000,
+            details={},
+            capabilities=("completion",),
+            template="",
+            parameters="",
+        )
+    provider = module["OllamaLocalJudgeProvider"](
+        _FakeClient(descriptor, []), diagnostic_tag, diagnostic_only=True,
+    )
+    assert provider.identity.provider_id == "ollama-local-diagnostic"
+    assert provider.descriptor.to_record()["diagnostic_only"] is True
+
+
+def test_diagnostic_provider_configuration_is_exact_tag_and_separate_provider_id():
+    from multilingual_judge_pilot.judge_inference import ContractError, ProviderIdentity
+    from multilingual_judge_pilot.provider_configuration import validate_provider_inference_configuration
+
+    identity = ProviderIdentity("ollama-local-diagnostic", "qwen3:4b-instruct-2507-q4_K_M", "sha256:" + "b" * 64)
+    params = (("num_ctx", 4096), ("num_predict", 48), ("seed", 17), ("temperature", 0.0), ("think", False))
+    validate_provider_inference_configuration(identity, params)
+    with pytest.raises(ContractError, match="diagnostic-only"):
+        validate_provider_inference_configuration(
+            ProviderIdentity("ollama-local-diagnostic", "qwen3.5:9b-q4_K_M", "sha256:" + "a" * 64),
+            params,
+        )
 
 
 def test_ollama_judge_uses_schema_local_endpoint_and_preserves_response_metrics():
@@ -446,3 +494,14 @@ def test_smoke_cleanup_only_stops_models_started_by_the_smoke(monkeypatch):
     monkeypatch.setattr(smoke, "_run_command", lambda args: calls.append(args) or "stopped")
     smoke._stop_any_loaded_models()
     assert calls == [["ollama", "stop", smoke.MODEL_TAGS[0]]]
+
+
+def test_smoke_cli_can_run_one_approved_judge_without_claiming_translation_coverage():
+    from scripts import p3_local_compatibility_smoke as smoke
+
+    args = smoke._parse_args(["--model-tag", "qwen3.5:9b-q4_K_M", "--skip-translation"])
+    assert args.model_tags == ["qwen3.5:9b-q4_K_M"]
+    assert args.skip_translation is True
+    defaults = smoke._parse_args([])
+    assert defaults.model_tags == list(smoke.MODEL_TAGS)
+    assert defaults.skip_translation is False

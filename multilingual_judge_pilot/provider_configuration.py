@@ -36,6 +36,7 @@ _LOCAL_OLLAMA_MODELS = {
     "gemma4:12b-it-qat",
     "translategemma:4b-it-q4_K_M",
 }
+_LOCAL_OLLAMA_DIAGNOSTIC_MODELS = {"qwen3:4b-instruct-2507-q4_K_M"}
 
 
 def _positive_integer(value: object, field_name: str) -> None:
@@ -50,9 +51,12 @@ def validate_provider_inference_configuration(
     """Validate a shortlisted candidate against its own API parameter contract."""
     profile = _CANDIDATES.get(identity.provider_id)
     if profile is None:
-        if identity.provider_id == "ollama-local":
+        if identity.provider_id in {"ollama-local", "ollama-local-diagnostic"}:
             parameters = dict(decoding_parameters)
-            if identity.model_id not in _LOCAL_OLLAMA_MODELS:
+            if identity.provider_id == "ollama-local-diagnostic":
+                if identity.model_id not in _LOCAL_OLLAMA_DIAGNOSTIC_MODELS:
+                    raise ContractError("diagnostic-only Ollama provider accepts only the explicitly authorized diagnostic model")
+            elif identity.model_id not in _LOCAL_OLLAMA_MODELS:
                 raise ContractError("Ollama local model ID must be one of the three approved tagged models")
             if not re.fullmatch(r"(?:sha256:)?[0-9a-f]{64}", identity.model_version):
                 raise ContractError("Ollama local model version must be its full SHA-256 digest")
