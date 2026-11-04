@@ -21,7 +21,7 @@ from typing import Callable, Mapping, Protocol, Sequence
 RUN_CONFIG_VERSION = "p3-run-config-3"
 RUN_MANIFEST_VERSION = "p3-run-manifest-3"
 JUDGE_REQUEST_VERSION = "p3-judge-request-2"
-RUN_RESULT_VERSION = "p3-run-result-4"
+RUN_RESULT_VERSION = "p3-run-result-5"
 PARSER_VERSION = "p3-binary-json-verdict-1"
 STRUCTURED_PARSER_VERSION = "p3-structured-validity-1"
 BINARY_RESPONSE_CONTRACT = "binary-verdict-v1"
@@ -97,10 +97,13 @@ class ContractError(ValueError):
 class ProviderCallError(RuntimeError):
     """Safe provider failure category; exception text is never put in run logs."""
 
-    def __init__(self, code: str):
+    def __init__(self, code: str, *, raw_response: str | None = None):
         if not code or not re.fullmatch(r"[a-zA-Z0-9_.-]+", code):
             raise ValueError("provider failure code must be a short stable identifier")
         self.code = code
+        if raw_response is not None and not isinstance(raw_response, str):
+            raise ValueError("provider error raw_response must be text or absent")
+        self.raw_response = raw_response
         super().__init__(code)
 
 
@@ -309,6 +312,31 @@ class JudgeFacingInput:
             action=self.action_record(),
             public_tool_schema=self.public_tool_schema_record(),
         )
+
+
+@dataclass(frozen=True)
+class TranslationFacingInput:
+    """Restricted translation input containing only the opaque ID and transcript."""
+
+    item_id: str
+    conversation: tuple[ConversationTurn, ...]
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.item_id, str) or not self.item_id.strip():
+            raise ContractError("translation input ID must be non-empty text")
+        if not isinstance(self.conversation, tuple) or not self.conversation:
+            raise ContractError("translation input requires conversation turns")
+        if any(not isinstance(turn, ConversationTurn) for turn in self.conversation):
+            raise ContractError("translation input conversation must contain ConversationTurn records")
+        indices = [turn.turn_index for turn in self.conversation]
+        if len(indices) != len(set(indices)) or indices != sorted(indices):
+            raise ContractError("translation input turns must be unique and chronological")
+
+    @classmethod
+    def from_judge_input(cls, item: JudgeFacingInput) -> "TranslationFacingInput":
+        if not isinstance(item, JudgeFacingInput):
+            raise ContractError("translation input projection requires JudgeFacingInput")
+        return cls(item.item_id, item.conversation)
 
 
 @dataclass(frozen=True)
@@ -770,13 +798,31 @@ class ProviderResponse:
     prompt_tokens: int | None = None
     completion_tokens: int | None = None
     cost_usd: str | None = None
+    prompt_eval_duration_ns: int | None = None
+    generation_duration_ns: int | None = None
+    load_duration_ns: int | None = None
+    total_duration_ns: int | None = None
+    completion_reason: str | None = None
+    response_incomplete: bool = False
 
     def __post_init__(self) -> None:
         if type(self.refused) is not bool:
             raise ContractError("refused must be a boolean provider signal")
+        if type(self.response_incomplete) is not bool:
+            raise ContractError("response_incomplete must be a boolean")
+        if self.completion_reason is not None and not isinstance(self.completion_reason, str):
+            raise ContractError("completion_reason must be text or absent")
         if self.raw_response is not None and not isinstance(self.raw_response, str):
             raise ContractError("raw_response must be text or absent")
         for name, value in (("prompt_tokens", self.prompt_tokens), ("completion_tokens", self.completion_tokens)):
+            if value is not None and (type(value) is not int or value < 0):
+                raise ContractError(f"{name} must be a non-negative integer or absent")
+        for name, value in (
+            ("prompt_eval_duration_ns", self.prompt_eval_duration_ns),
+            ("generation_duration_ns", self.generation_duration_ns),
+            ("load_duration_ns", self.load_duration_ns),
+            ("total_duration_ns", self.total_duration_ns),
+        ):
             if value is not None and (type(value) is not int or value < 0):
                 raise ContractError(f"{name} must be a non-negative integer or absent")
         validate_cost_usd(self.cost_usd)
@@ -828,10 +874,16 @@ class AttemptRecord:
     cost_usd: str | None
     provider_refused: bool | None
     failure_code: str | None
+    prompt_eval_duration_ns: int | None = None
+    generation_duration_ns: int | None = None
+    load_duration_ns: int | None = None
+    total_duration_ns: int | None = None
+    completion_reason: str | None = None
+    response_incomplete: bool = False
 
     def to_record(self) -> dict[str, object]:
         return {
-            "record_version": "p3-attempt-record-2",
+            "record_version": "p3-attempt-record-3",
             "execution_id": self.execution_id,
             "attempt_id": self.attempt_id,
             "attempt_number": self.attempt_number,
@@ -845,6 +897,12 @@ class AttemptRecord:
             "cost_usd": self.cost_usd,
             "provider_refused": self.provider_refused,
             "failure_code": self.failure_code,
+            "prompt_eval_duration_ns": self.prompt_eval_duration_ns,
+            "generation_duration_ns": self.generation_duration_ns,
+            "load_duration_ns": self.load_duration_ns,
+            "total_duration_ns": self.total_duration_ns,
+            "completion_reason": self.completion_reason,
+            "response_incomplete": self.response_incomplete,
         }
 
 
@@ -1003,7 +1061,7 @@ class JudgeExecutor:
                         attempt_id=f"{execution_id}:{request.request_id}:{attempt_number}",
                         attempt_number=attempt_number,
                         call_status="provider_failure",
-                        raw_response=None,
+                        raw_response=getattr(exc, "raw_response", None),
                         parse_status=None,
                         verdict=None,
                         latency_ms=max(0, end - start) / 1_000_000,
@@ -1025,7 +1083,9 @@ class JudgeExecutor:
                 break
 
             end = self.clock_ns()
-            if request.response_contract_version == STRUCTURED_RESPONSE_CONTRACT:
+            if response.response_incomplete:
+                final_result = ParseResult(ParseStatus.INVALID_OUTPUT)
+            elif request.response_contract_version == STRUCTURED_RESPONSE_CONTRACT:
                 final_result = parse_structured_verdict_response(
                     response.raw_response,
                     action_turn_index=request.action_turn_index,
@@ -1049,6 +1109,12 @@ class JudgeExecutor:
                     cost_usd=response.cost_usd,
                     provider_refused=response.refused,
                     failure_code=None,
+                    prompt_eval_duration_ns=response.prompt_eval_duration_ns,
+                    generation_duration_ns=response.generation_duration_ns,
+                    load_duration_ns=response.load_duration_ns,
+                    total_duration_ns=response.total_duration_ns,
+                    completion_reason=response.completion_reason,
+                    response_incomplete=response.response_incomplete,
                 )
             )
             # Parse failures and refusals are retained as outcomes; only configured provider errors retry.

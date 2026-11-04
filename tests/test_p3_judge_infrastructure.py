@@ -199,6 +199,9 @@ def test_translation_first_preserves_translator_provenance_and_same_action_tool_
             self.identity = identity
 
         def translate(self, item, config):
+            assert not hasattr(item, "action")
+            assert not hasattr(item, "public_tool_schema")
+            assert not hasattr(item, "language_condition")
             from multilingual_judge_pilot.judge_baselines import TranslationOutput
             from p3_synthetic_fixtures import english_fixture_translation
 

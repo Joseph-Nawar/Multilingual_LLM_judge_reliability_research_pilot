@@ -8,6 +8,7 @@ against current official documentation and added with a versioned test.
 from __future__ import annotations
 
 from collections.abc import Mapping
+import re
 
 from .judge_inference import ContractError, ProviderIdentity
 
@@ -30,6 +31,12 @@ _CANDIDATES = {
     },
 }
 
+_LOCAL_OLLAMA_MODELS = {
+    "qwen3.5:9b-q4_K_M",
+    "gemma4:12b-it-qat",
+    "translategemma:4b-it-q4_K_M",
+}
+
 
 def _positive_integer(value: object, field_name: str) -> None:
     if type(value) is not int or value < 1:
@@ -43,6 +50,27 @@ def validate_provider_inference_configuration(
     """Validate a shortlisted candidate against its own API parameter contract."""
     profile = _CANDIDATES.get(identity.provider_id)
     if profile is None:
+        if identity.provider_id == "ollama-local":
+            parameters = dict(decoding_parameters)
+            if identity.model_id not in _LOCAL_OLLAMA_MODELS:
+                raise ContractError("Ollama local model ID must be one of the three approved tagged models")
+            if not re.fullmatch(r"(?:sha256:)?[0-9a-f]{64}", identity.model_version):
+                raise ContractError("Ollama local model version must be its full SHA-256 digest")
+            allowed = {"num_ctx", "num_predict", "seed", "temperature", "think"}
+            unknown = set(parameters) - allowed
+            if unknown:
+                raise ContractError(f"unsupported Ollama decoding parameter(s): {', '.join(sorted(unknown))}")
+            missing = {"num_ctx", "num_predict", "seed", "temperature"} - set(parameters)
+            if missing:
+                raise ContractError(f"missing Ollama decoding parameter(s): {', '.join(sorted(missing))}")
+            _positive_integer(parameters["num_ctx"], "num_ctx")
+            _positive_integer(parameters["num_predict"], "num_predict")
+            if type(parameters["seed"]) is not int:
+                raise ContractError("Ollama seed must be an integer")
+            if type(parameters["temperature"]) not in {int, float} or not 0 <= parameters["temperature"] <= 2:
+                raise ContractError("Ollama temperature must be between 0 and 2")
+            if "think" in parameters and type(parameters["think"]) is not bool:
+                raise ContractError("Ollama think must be an explicit boolean")
         return
     if identity.model_id != profile["model_id"]:
         raise ContractError(f"provider {identity.provider_id} model ID must be {profile['model_id']}")

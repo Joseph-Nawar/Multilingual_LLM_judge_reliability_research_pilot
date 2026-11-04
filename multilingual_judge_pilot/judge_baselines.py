@@ -23,6 +23,7 @@ from .judge_inference import (
     ProviderIdentity,
     RunConfig,
     TranslationConfig,
+    TranslationFacingInput,
     TranslationFailurePolicy,
     STRUCTURED_PARSER_VERSION,
     STRUCTURED_RESPONSE_CONTRACT,
@@ -70,6 +71,7 @@ class TranslationOutput:
     prompt_tokens: int | None = None
     completion_tokens: int | None = None
     cost_usd: str | None = None
+    provider_call_records: tuple[dict[str, object], ...] = ()
 
     def __post_init__(self) -> None:
         if not isinstance(self.raw_output, str) or not self.raw_output:
@@ -80,6 +82,9 @@ class TranslationOutput:
             if value is not None and (type(value) is not int or value < 0):
                 raise ContractError(f"{name} must be a non-negative integer or absent")
         validate_cost_usd(self.cost_usd)
+        if not isinstance(self.provider_call_records, tuple) or any(not isinstance(row, dict) for row in self.provider_call_records):
+            raise ContractError("provider_call_records must be a tuple of serializable call records")
+        canonical_json(self.provider_call_records)
 
 
 class TranslationCallError(RuntimeError):
@@ -93,6 +98,7 @@ class TranslationCallError(RuntimeError):
         prompt_tokens: int | None = None,
         completion_tokens: int | None = None,
         cost_usd: str | None = None,
+        provider_call_records: tuple[dict[str, object], ...] = (),
         message: str | None = None,
     ) -> None:
         if not isinstance(category, str) or not re.fullmatch(r"[a-zA-Z0-9_.-]+", category):
@@ -103,11 +109,15 @@ class TranslationCallError(RuntimeError):
             if value is not None and (type(value) is not int or value < 0):
                 raise ContractError(f"{name} must be a non-negative integer or absent")
         validate_cost_usd(cost_usd)
+        if not isinstance(provider_call_records, tuple) or any(not isinstance(row, dict) for row in provider_call_records):
+            raise ContractError("provider_call_records must be a tuple of serializable call records")
+        canonical_json(provider_call_records)
         self.category = category
         self.raw_response = raw_response
         self.prompt_tokens = prompt_tokens
         self.completion_tokens = completion_tokens
         self.cost_usd = cost_usd
+        self.provider_call_records = provider_call_records
         # Provider detail can include credentials; keep only the stable category in the exception text.
         super().__init__(category)
 
@@ -116,7 +126,7 @@ class Translator(Protocol):
     @property
     def identity(self) -> ProviderIdentity: ...
 
-    def translate(self, item: JudgeFacingInput, config: TranslationConfig) -> TranslationOutput: ...
+    def translate(self, item: TranslationFacingInput, config: TranslationConfig) -> TranslationOutput: ...
 
 
 @dataclass(frozen=True)
@@ -188,10 +198,11 @@ class TranslationAttemptRecord:
     completion_tokens: int | None
     cost_usd: str | None
     latency_ms: float
+    provider_call_records: tuple[dict[str, object], ...] = ()
 
     def to_record(self) -> dict[str, object]:
         return {
-            "record_version": "translation-attempt-1",
+            "record_version": "translation-attempt-2",
             "execution_id": self.execution_id,
             "attempt_id": self.attempt_id,
             "configuration_hash": self.configuration_hash,
@@ -220,6 +231,7 @@ class TranslationAttemptRecord:
             "completion_tokens": self.completion_tokens,
             "cost_usd": self.cost_usd,
             "latency_ms": self.latency_ms,
+            "provider_call_records": list(self.provider_call_records),
         }
 
 
@@ -328,7 +340,7 @@ class TranslationFirstBaseline:
     utc_now: Callable[[], datetime] = field(default=lambda: datetime.now(timezone.utc), repr=False, compare=False)
     execution_id_factory: Callable[[], str] = field(default=lambda: uuid4().hex, repr=False, compare=False)
 
-    def prepare(self, item: JudgeFacingInput, config: RunConfig) -> BaselinePlan:
+    def prepare(self, item: JudgeFacingInput, config: RunConfig, *, translation_artifact=None) -> BaselinePlan:
         _validate_config(config, BaselineKind.TRANSLATION_FIRST, self.prompt.version, "single-binary-verdict-1")
         translation_config = config.translation
         if translation_config is None:
@@ -338,6 +350,29 @@ class TranslationFirstBaseline:
         execution_id = self.execution_id_factory()
         if not isinstance(execution_id, str) or not execution_id.strip():
             raise ContractError("translation execution ID factory must return non-empty text")
+        if translation_artifact is not None:
+            from .translation_artifacts import TranslationArtifact
+
+            if not isinstance(translation_artifact, TranslationArtifact):
+                raise ContractError("translation_artifact must be a versioned TranslationArtifact")
+            translation_artifact.validate_for(item, config)
+            translated_item = item.with_conversation(translation_artifact.translated_turns)
+            request = build_judge_request(
+                translated_item,
+                run_id=config.run_id,
+                baseline=BaselineKind.TRANSLATION_FIRST,
+                stage_id="translated_verdict",
+                prompt=self.prompt,
+            )
+            return BaselinePlan(
+                BaselineKind.TRANSLATION_FIRST.value,
+                (request,),
+                SingleVerdictAggregator(),
+                item_id=item.item_id,
+                execution_id=execution_id,
+                translation_records=translation_artifact.translation_records,
+                translation_attempts=translation_artifact.translation_attempts,
+            )
         source_turns = [turn.to_record() for turn in item.conversation]
         source_hash = sha256(canonical_json(source_turns).encode("utf-8")).hexdigest()
         attempts: list[TranslationAttemptRecord] = []
@@ -349,7 +384,7 @@ class TranslationFirstBaseline:
             started_ns = self.clock_ns()
             output: TranslationOutput | None = None
             try:
-                output = self.translator.translate(item, translation_config)
+                output = self.translator.translate(TranslationFacingInput.from_judge_input(item), translation_config)
                 self._validate_translation_output(item, output, translation_config)
             except Exception as exc:  # exception messages may contain provider credentials
                 completed_ns = self.clock_ns()
@@ -360,6 +395,7 @@ class TranslationFirstBaseline:
                 prompt_tokens = getattr(exc, "prompt_tokens", None)
                 completion_tokens = getattr(exc, "completion_tokens", None)
                 cost_usd = getattr(exc, "cost_usd", None)
+                provider_call_records = getattr(exc, "provider_call_records", ())
                 if output is not None:
                     raw_response = raw_response if raw_response is not None else output.raw_output
                     prompt_tokens = prompt_tokens if prompt_tokens is not None else output.prompt_tokens
@@ -384,6 +420,7 @@ class TranslationFirstBaseline:
                         prompt_tokens=prompt_tokens,
                         completion_tokens=completion_tokens,
                         cost_usd=cost_usd,
+                        provider_call_records=provider_call_records,
                     )
                 )
                 if can_retry:
@@ -415,6 +452,7 @@ class TranslationFirstBaseline:
                     prompt_tokens=output.prompt_tokens,
                     completion_tokens=output.completion_tokens,
                     cost_usd=output.cost_usd,
+                    provider_call_records=output.provider_call_records,
                 )
             )
             break
@@ -511,6 +549,7 @@ class TranslationFirstBaseline:
         prompt_tokens: int | None,
         completion_tokens: int | None,
         cost_usd: str | None,
+        provider_call_records: tuple[dict[str, object], ...] = (),
     ) -> TranslationAttemptRecord:
         return TranslationAttemptRecord(
             execution_id=execution_id,
@@ -539,6 +578,7 @@ class TranslationFirstBaseline:
             completion_tokens=completion_tokens,
             cost_usd=cost_usd,
             latency_ms=latency_ms,
+            provider_call_records=provider_call_records,
         )
 
     def _translation_failure_plan(
