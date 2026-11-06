@@ -505,3 +505,27 @@ def test_smoke_cli_can_run_one_approved_judge_without_claiming_translation_cover
     defaults = smoke._parse_args([])
     assert defaults.model_tags == list(smoke.MODEL_TAGS)
     assert defaults.skip_translation is False
+
+
+def test_smoke_structured_config_sets_the_required_versioned_parser():
+    from types import SimpleNamespace
+
+    from scripts import p3_local_compatibility_smoke as smoke
+    from multilingual_judge_pilot.judge_inference import (
+        BaselineKind,
+        ProviderIdentity,
+        STRUCTURED_PARSER_VERSION,
+    )
+
+    provider = SimpleNamespace(identity=ProviderIdentity(
+        "ollama-local", "qwen3.5:9b-q4_K_M", "sha256:" + "a" * 64,
+    ))
+    config = smoke._make_run_config(
+        provider,
+        BaselineKind.STRUCTURED_SINGLE_CALL.value,
+        prompt_version="synthetic-structured-smoke-v1",
+        input_hash="b" * 64,
+        decoding={"num_ctx": 4096, "num_predict": 256, "seed": 17, "temperature": 0.0},
+    )
+
+    assert config.parser_version == STRUCTURED_PARSER_VERSION

@@ -35,6 +35,7 @@ from multilingual_judge_pilot.judge_inference import (  # noqa: E402
     JudgeExecutor,
     PromptSpec,
     RunConfig,
+    STRUCTURED_PARSER_VERSION,
     TranslationConfig,
     canonical_json,
 )
@@ -196,6 +197,7 @@ def _make_run_config(provider, baseline: str, *, prompt_version: str, input_hash
     kwargs = {}
     if baseline == BaselineKind.STRUCTURED_SINGLE_CALL.value:
         kwargs["aggregation_version"] = "single-structured-verdict-1"
+        kwargs["parser_version"] = STRUCTURED_PARSER_VERSION
     return RunConfig(
         provider=provider.identity,
         baseline=baseline,
