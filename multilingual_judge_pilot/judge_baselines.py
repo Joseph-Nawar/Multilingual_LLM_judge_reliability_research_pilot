@@ -26,7 +26,9 @@ from .judge_inference import (
     TranslationFacingInput,
     TranslationFailurePolicy,
     STRUCTURED_PARSER_VERSION,
+    STRUCTURED_PARSER_VERSION_V2,
     STRUCTURED_RESPONSE_CONTRACT,
+    STRUCTURED_RESPONSE_CONTRACT_V2,
     validate_cost_usd,
     build_judge_request,
     canonical_json,
@@ -671,25 +673,35 @@ class StructuredSingleCallBaseline:
     prompt: PromptSpec
 
     def prepare(self, item: JudgeFacingInput, config: RunConfig) -> BaselinePlan:
+        supported = {
+            STRUCTURED_PARSER_VERSION: (STRUCTURED_RESPONSE_CONTRACT, "single-structured-verdict-1"),
+            STRUCTURED_PARSER_VERSION_V2: (STRUCTURED_RESPONSE_CONTRACT_V2, "single-structured-verdict-2"),
+        }
+        expected_contract, aggregation_version = supported.get(
+            config.parser_version,
+            (None, None),
+        )
+        if expected_contract is None or aggregation_version is None:
+            raise ContractError("single-call structured baseline requires a supported versioned parser")
         _validate_config(
             config,
             BaselineKind.STRUCTURED_SINGLE_CALL,
             self.prompt.version,
-            "single-structured-verdict-1",
+            aggregation_version,
         )
-        if config.parser_version != STRUCTURED_PARSER_VERSION:
-            raise ContractError("single-call structured baseline requires its versioned parser")
+        if config.effective_response_contract_version != expected_contract:
+            raise ContractError("single-call structured baseline requires its matching response contract")
         request = build_judge_request(
             item,
             run_id=config.run_id,
             baseline=BaselineKind.STRUCTURED_SINGLE_CALL,
             stage_id="structured_validity",
             prompt=self.prompt,
-            response_contract_version=STRUCTURED_RESPONSE_CONTRACT,
+            response_contract_version=expected_contract,
         )
         return BaselinePlan(
             BaselineKind.STRUCTURED_SINGLE_CALL.value,
             (request,),
-            StructuredSingleVerdictAggregator(),
+            StructuredSingleVerdictAggregator(version=aggregation_version),
             item_id=item.item_id,
         )

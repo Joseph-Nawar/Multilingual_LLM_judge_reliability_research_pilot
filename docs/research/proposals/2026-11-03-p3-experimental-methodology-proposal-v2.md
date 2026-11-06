@@ -4,6 +4,8 @@
 
 **Evidence checked:** 2026-11-03 using official provider documentation linked below. Recheck model IDs, structured-output behavior, pricing, service terms, data handling, and availability before any later approval or purchase.
 
+**Subsequent accounting correction (2026-11-06):** The 288 Arabic-bearing variants below count items that require translation, not translator provider calls. The translator calls once per Arabic turn; calculate calls as the Arabic-turn total plus recorded retries. See the [P3 Local Method Stabilization proposal](2026-11-06-p3-local-method-stabilization-proposal.md). The earlier translation-call and price totals are superseded and must not be reused.
+
 This revision follows the owner's direction to keep GPT-6.1 Sol, Claude Sonnet 5.5, and Gemini 3.8 Flash as provisional candidate backbones, and to use a single-call structured baseline as the primary structured alternative. It corrects the v1 three-call cost/method design. It does not access study data, authorize spend, authorize dataset freeze, or authorize inference.
 
 ## 1. Candidate models
@@ -45,13 +47,13 @@ The mandatory proposed ordinary comparison is **three baselines × 384 locked it
 
 ### Baseline B — Translation-first judging
 
-- Translate the complete conversation to English wherever any turn is Arabic-bearing; leave all-English conversations untouched. The proposed locked translation workload is 288 Arabic-bearing variants, translated once and hash-bound for reuse across all three judge backbones where feasible. Each model still receives one judge call for each of the 384 items.
+- Translate the complete conversation to English wherever any turn is Arabic-bearing; leave all-English conversations untouched. The proposed locked translation workload is 288 Arabic-bearing items, with successful conversation artifacts hash-bound for reuse across all three judge backbones where feasible. Translation runs at Arabic-turn level; provider calls equal the eligible Arabic-turn count plus actual retries. Each model still receives one judge call for each of the 384 items.
 - The translator receives only the turn-indexed conversation, with source language, speaker role, and chronology. It does not receive the action, tool contract, state, or label. It must preserve turn count/order and roles, numerical amounts and units, dates, times and time zones, currency codes, identifiers and code-like literals, negation, quantifiers, permission grants/revocations and scope, and relative references with their original intended meaning.
 - Translation must not resolve an ambiguous or contextual reference from canonical state or hidden study metadata. It may translate the words and preserve the ambiguity. Do not silently correct mistranslations with a reference, label, or oracle. No judge sees canonical state.
 - The same accepted, hash-bound translation output is reused by all backbones if the item/config hashes match. Retain all translation attempts, failures, costs, raw outputs, and retries. A terminal translation failure skips judging for that item and remains a translation-stage missing result; there is no silent direct-language fallback.
 - Translation quality checks should use independent, non-study examples and a human-reviewed procedure before a later live run. The optional 24-item translation quality workload in the budget is a proposal, not a locked-data step.
 - The translated judge request then carries the translated conversation, unchanged action, unchanged public tool contract, and the same validity rubric and strict binary parser as Baseline A.
-- Proposed call count: **384 judge calls per backbone**, plus **288 shared translation calls** for locked Arabic-bearing inputs. The optional separate 24 translation-QC inputs add 24 translator calls.
+- Proposed call count: **384 judge calls per backbone**. The 288 Arabic-bearing evaluation items are not a translator-call count; translation calls equal the sum of their Arabic turns plus actual retries. The optional 24 independent translation-QC items are also item counts, and their calls depend on Arabic-turn count.
 
 ### Baseline C — Single-call structured judging
 
@@ -93,7 +95,7 @@ The estimates use current public standard token prices, no batch/caching discoun
 | Single-call structured judging | 384 per backbone |
 | **Ordinary judging** | **1,152 per backbone; 3,456 for three backbones** |
 | Competence screen | 48 per backbone; **144 total** |
-| Shared translation | 288 locked Arabic-bearing inputs, plus 24 optional independent translation-QC inputs = **312 assumed translator calls** |
+| Shared translation | 288 locked Arabic-bearing items, plus 24 optional independent translation-QC items; compute provider calls from Arabic turns plus retries |
 | Optional H2, if both diagnostics run | 768 per backbone; 2,304 total |
 | Optional three-call decomposition, in addition to Baseline C | 1,152 per backbone; 3,456 total |
 

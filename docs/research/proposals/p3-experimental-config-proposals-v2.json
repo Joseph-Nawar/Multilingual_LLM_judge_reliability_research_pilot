@@ -142,7 +142,16 @@
       "high": {"retry_fraction": 0.1, "direct_translation_judge_input_output": [2600, 150], "structured_judge_input_output": [3300, 600], "competence_input_output": [1600, 160], "translation_input_output": [2600, 600], "state_extraction_input_output": [3300, 900], "oracle_intervention_input_output": [3500, 150], "three_call_criterion_input_output": [3100, 350], "reasoning_output_tokens": {"openai": {"direct_translation": 500, "structured": 900, "screen": 250, "state_extraction": 1000, "oracle_intervention": 500, "decomposition": 500}, "anthropic": {"direct_translation": 750, "structured": 1300, "screen": 300, "state_extraction": 1300, "oracle_intervention": 750, "decomposition": 650}, "google": {"direct_translation": 600, "structured": 1100, "screen": 300, "state_extraction": 1100, "oracle_intervention": 600, "decomposition": 600}, "translator_google": 300}}
     },
     "retry_stress": "0%, 2%, and 10% of applicable calls receive one extra technical attempt; expected/high products are expected counts and can be fractional. No retries assumed for malformed/refused outputs. No caching or batch discounts.",
-    "translation_quality": "The total assumes 24 optional independent translation-QC inputs in addition to 288 locked Arabic-bearing inputs; remove these costs if owner declines that separate QC plan.",
+    "translation_quality": "Historical planning counted 24 optional independent translation-QC items in addition to 288 locked Arabic-bearing items; this is an item count, not a provider-call count. The associated translation cost totals are superseded.",
+    "translation_accounting_correction": {
+      "status": "Correction to prior planning language; does not recalculate historical commercial cost arithmetic.",
+      "arabic_bearing_evaluation_items": 288,
+      "provider_call_formula": "Sum Arabic conversation turns across translation-eligible items, plus every retry attempt actually made.",
+      "illustrative_two_turn_design_only": {"AR-AR_items": 96, "EN-AR_items": 96, "AR-EN_items": 96, "base_arabic_turn_provider_calls": 384},
+      "artifact_reuse": "A successful hash-bound conversation translation may be reused across judge backbones.",
+      "locked_inventory": "No locked conversation was inspected to estimate Arabic-turn counts; compute exact calls only from a validated manifest at an authorized stage.",
+      "historical_field_interpretation": "shared_translations.locked_arabic_bearing_inputs is an item count, not a provider-call count; previous total and cost estimates are superseded for future planning."
+    },
     "estimates_usd": {
       "current_intro_prices": {
         "low": {"openai_ordinary_including_screen": 5.3904, "anthropic_ordinary_including_screen": 5.9712, "google_ordinary_including_screen": 1.9926, "shared_translation": 0.3861, "ordinary_total": 13.7403, "optional_h2_all_models": 10.524, "optional_three_call_all_models": 12.2688, "all_optional_total": 36.5331},

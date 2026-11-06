@@ -7,11 +7,13 @@ literal loopback address and accepts the three exact provisional model tags.
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
+from collections import Counter
 from datetime import datetime, timezone
 from hashlib import sha256
 import json
 import re
 import time
+import unicodedata
 from typing import Mapping
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlsplit
@@ -42,6 +44,8 @@ APPROVED_OLLAMA_TAGS = frozenset(
 )
 DIAGNOSTIC_OLLAMA_TAGS = frozenset({"qwen3:4b-instruct-2507-q4_K_M"})
 TRANSLATEGEMMA_PROMPT_VERSION = "translategemma-ollama-official-prompt-literal-shield-v1"
+TRANSLATEGEMMA_CONTEXT_PROMPT_VERSION = "translategemma-contextual-unshielded-preservation-v2"
+TRANSLATEGEMMA_CONTEXT_PROMPT_VERSION_V3 = "translategemma-contextual-unshielded-official-format-v3"
 
 
 class OllamaLocalError(ProviderCallError):
@@ -352,6 +356,58 @@ def _restore_literals(translated: str, literals: tuple[tuple[str, str], ...]) ->
     return translated
 
 
+def _literal_preservation_failures(source: str, translated: str) -> dict[str, list[str]]:
+    """Check exact numeric, identifier, date, time-zone, and currency-code literals."""
+    source_literals = Counter(match.group(0) for match in _LITERAL_PATTERN.finditer(source))
+    target_literals = Counter(match.group(0) for match in _LITERAL_PATTERN.finditer(translated))
+    missing = sorted(literal for literal, count in source_literals.items() if target_literals[literal] < count)
+    unexpected = sorted(literal for literal, count in target_literals.items() if source_literals[literal] < count)
+    return {"missing": missing, "unexpected": unexpected}
+
+
+def _literal_preservation_failures_v3(source: str, translated: str) -> dict[str, list[str]]:
+    """Compare numbers across Arabic/Latin digit scripts and exact code literals."""
+    from .iso4217_snapshot import SUPPORTED_CURRENCY_CODES
+
+    def normalized_numbers(text: str) -> Counter[str]:
+        values = []
+        for match in re.finditer(r"\d+", text):
+            normalized = "".join(str(unicodedata.digit(char)) for char in match.group(0))
+            values.append(normalized.lstrip("0") or "0")
+        return Counter(values)
+
+    identifier_pattern = re.compile(r"(?<![\w])(?:[A-Za-z][A-Za-z0-9]*(?:[._/:+-][A-Za-z0-9]+)*)(?![\w])")
+
+    def identifiers(text: str) -> Counter[str]:
+        return Counter(
+            match.group(0)
+            for match in identifier_pattern.finditer(text)
+            if any(char.isalpha() for char in match.group(0)) and any(char.isdigit() for char in match.group(0))
+        )
+
+    currency_pattern = re.compile(r"(?<![A-Za-z])[A-Z]{3}(?![A-Za-z])")
+
+    def currencies(text: str) -> Counter[str]:
+        return Counter(code for code in currency_pattern.findall(text) if code in SUPPORTED_CURRENCY_CODES)
+
+    def difference(left: Counter[str], right: Counter[str]) -> tuple[list[str], list[str]]:
+        missing = sorted(value for value, count in left.items() for _ in range(max(0, count - right[value])))
+        extra = sorted(value for value, count in right.items() for _ in range(max(0, count - left[value])))
+        return missing, extra
+
+    source_numbers, target_numbers = difference(normalized_numbers(source), normalized_numbers(translated))
+    source_ids, target_ids = difference(identifiers(source), identifiers(translated))
+    source_codes, target_codes = difference(currencies(source), currencies(translated))
+    return {
+        "missing_numbers": source_numbers,
+        "unexpected_numbers": target_numbers,
+        "missing_identifiers": source_ids,
+        "unexpected_identifiers": target_ids,
+        "missing_currency_codes": source_codes,
+        "unexpected_currency_codes": target_codes,
+    }
+
+
 def _utc_now() -> str:
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
@@ -378,8 +434,17 @@ class OllamaLocalTranslator:
             raise ContractError("TranslateGemma accepts only transcript-only TranslationFacingInput")
         if config.translator != self.identity or config.pivot_language != "en":
             raise ContractError("TranslateGemma configuration must match the local model and English pivot")
-        if config.prompt_version != TRANSLATEGEMMA_PROMPT_VERSION:
-            raise ContractError("TranslateGemma prompt version must identify the official prompt and literal-shield procedure")
+        if config.prompt_version not in {
+            TRANSLATEGEMMA_PROMPT_VERSION,
+            TRANSLATEGEMMA_CONTEXT_PROMPT_VERSION,
+            TRANSLATEGEMMA_CONTEXT_PROMPT_VERSION_V3,
+        }:
+            raise ContractError("TranslateGemma prompt version must identify a supported versioned translation procedure")
+        contextual_unshielded = config.prompt_version in {
+            TRANSLATEGEMMA_CONTEXT_PROMPT_VERSION,
+            TRANSLATEGEMMA_CONTEXT_PROMPT_VERSION_V3,
+        }
+        official_context_format = config.prompt_version == TRANSLATEGEMMA_CONTEXT_PROMPT_VERSION_V3
         parameters = dict(config.decoding_parameters)
         options, think = _request_options(parameters, self.descriptor)
         if think is not None:
@@ -391,22 +456,56 @@ class OllamaLocalTranslator:
         prompt_tokens: list[int] = []
         completion_tokens: list[int] = []
         total_latency_ms = 0.0
-        for turn in item.conversation:
+        for turn_position, turn in enumerate(item.conversation):
             if turn.language != "ar":
                 translated_turns.append(replace(turn, language="en"))
                 continue
-            protected_text, literals = _shield_literals(turn.content)
-            prompt = (
-                "You are a professional Arabic (ar) to English (en) translator. Your goal is to accurately convey the meaning and nuances of the original Arabic text while adhering to English grammar, vocabulary, and cultural sensitivities.\n"
-                "Produce only the English translation, without any additional explanations or commentary. Please translate the following Arabic text into English:\n\n\n"
-                f"{protected_text}"
-            )
-            input_hash = sha256(canonical_json({"item_id": item.item_id, "turn": turn.to_record()}).encode("utf-8")).hexdigest()
+            preceding_turns = item.conversation[:turn_position] if contextual_unshielded else ()
+            if contextual_unshielded:
+                literals = ()
+                context = "\n".join(
+                    f"[turn {prior.turn_index}] {prior.speaker} ({prior.language}): {prior.content}"
+                    for prior in preceding_turns
+                ) or "(no preceding turns)"
+                if official_context_format:
+                    prompt = (
+                        "You are a professional Arabic (ar) to English (en) translator. Your goal is to accurately convey the meaning and nuances of the original Arabic text while adhering to English grammar, vocabulary, and cultural sensitivities.\n"
+                        "Produce only the English translation, without any additional explanations or commentary.\n"
+                        "The preceding transcript is context only. Use it only to interpret references supported by the visible dialogue; do not translate or summarize it, use hidden or canonical state, or add unstated requirements. Preserve destination-name meaning.\n"
+                        f"Preceding transcript for context only:\n{context}\n\n"
+                        "Please translate the following Arabic text into English:\n\n\n"
+                        f"{turn.content}"
+                    )
+                else:
+                    prompt = (
+                        "You are a professional Arabic (ar) to English (en) translator. Accurately convey the meaning and nuances of the target Arabic turn.\n"
+                        "The preceding conversation context may be used only to interpret language references supported by the visible dialogue. "
+                        "Do not use hidden or canonical state, add unstated requirements, or translate or summarize the context.\n"
+                        "Preserve exact identifiers, numeric strings, dates, times, time-zone strings, currency codes, and destination names as written. "
+                        "Return only the English translation of the target turn, with no commentary.\n\n"
+                        f"Preceding conversation context:\n{context}\n\n"
+                        f"Target turn [{turn.turn_index}] {turn.speaker} (ar):\n{turn.content}"
+                    )
+            else:
+                protected_text, literals = _shield_literals(turn.content)
+                prompt = (
+                    "You are a professional Arabic (ar) to English (en) translator. Your goal is to accurately convey the meaning and nuances of the original Arabic text while adhering to English grammar, vocabulary, and cultural sensitivities.\n"
+                    "Produce only the English translation, without any additional explanations or commentary. Please translate the following Arabic text into English:\n\n\n"
+                    f"{protected_text}"
+                )
+            input_hash = sha256(canonical_json({
+                "item_id": item.item_id,
+                "turn": turn.to_record(),
+                "context": [prior.to_record() for prior in preceding_turns],
+                "prompt_version": config.prompt_version,
+            }).encode("utf-8")).hexdigest()
             call_id = uuid4().hex
             started_at = _utc_now()
             started_ns = time.perf_counter_ns()
             raw_response: str | None = None
             response: dict[str, object] | None = None
+            literal_preservation_status = "protected_and_restored" if not contextual_unshielded else "pending"
+            literal_failures: dict[str, list[str]] = {"missing": [], "unexpected": []}
             failure: str | None = None
             try:
                 body: dict[str, object] = {
@@ -430,12 +529,26 @@ class OllamaLocalTranslator:
                 raw_response = content
                 if result.get("done") is not True or result.get("done_reason") in {"length", "max_tokens"}:
                     raise OllamaLocalError("translation_output_incomplete", raw_response=raw_response)
-                translated = _restore_literals(raw_response.strip(), literals)
+                translated = raw_response.strip() if contextual_unshielded else _restore_literals(raw_response.strip(), literals)
+                if contextual_unshielded:
+                    literal_failures = (
+                        _literal_preservation_failures_v3(turn.content, translated)
+                        if official_context_format
+                        else _literal_preservation_failures(turn.content, translated)
+                    )
+                    literal_preservation_status = "passed" if not any(literal_failures.values()) else "failed"
+                    if literal_preservation_status == "failed":
+                        raise ValueError("translation_literal_preservation_failure")
                 if not translated:
                     raise ValueError("empty_translation")
             except Exception as exc:
                 elapsed = max(0, time.perf_counter_ns() - started_ns)
-                failure = exc.code if isinstance(exc, ProviderCallError) else str(exc) if str(exc) == "translation_protected_literal_mismatch" else "local_connection_failure"
+                safe_local_errors = {
+                    "translation_protected_literal_mismatch",
+                    "translation_literal_preservation_failure",
+                    "empty_translation",
+                }
+                failure = exc.code if isinstance(exc, ProviderCallError) else str(exc) if str(exc) in safe_local_errors else "local_connection_failure"
                 ended_at = _utc_now()
                 call_records.append(
                     self._call_record(
@@ -453,6 +566,9 @@ class OllamaLocalTranslator:
                         raw_response=raw_response or getattr(exc, "raw_response", None),
                         result=response,
                         protected_literal_count=len(literals),
+                        context_turn_indices=tuple(prior.turn_index for prior in preceding_turns),
+                        literal_preservation_status=literal_preservation_status,
+                        literal_preservation_failures=literal_failures,
                     )
                 )
                 raise TranslationCallError(
@@ -489,6 +605,9 @@ class OllamaLocalTranslator:
                     raw_response=raw_response,
                     result=response,
                     protected_literal_count=len(literals),
+                    context_turn_indices=tuple(prior.turn_index for prior in preceding_turns),
+                    literal_preservation_status=literal_preservation_status,
+                    literal_preservation_failures=literal_failures,
                 )
             )
             raw_outputs.append({"turn_index": turn.turn_index, "raw_response": raw_response})
@@ -520,6 +639,9 @@ class OllamaLocalTranslator:
         raw_response: str | None,
         result: Mapping[str, object] | None,
         protected_literal_count: int,
+        context_turn_indices: tuple[int, ...] = (),
+        literal_preservation_status: str = "not_applicable",
+        literal_preservation_failures: Mapping[str, list[str]] | None = None,
     ) -> dict[str, object]:
         result = result or {}
         return {
@@ -549,4 +671,7 @@ class OllamaLocalTranslator:
             "cost_usd": "0",
             "latency_ms": latency_ns / 1_000_000,
             "protected_literal_count": protected_literal_count,
+            "input_context_turn_indices": list(context_turn_indices),
+            "literal_preservation_status": literal_preservation_status,
+            "literal_preservation_failures": dict(literal_preservation_failures or {"missing": [], "unexpected": []}),
         }

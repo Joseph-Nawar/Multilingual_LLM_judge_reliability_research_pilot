@@ -18,14 +18,16 @@ import time
 from typing import Callable, Mapping, Protocol, Sequence
 
 
-RUN_CONFIG_VERSION = "p3-run-config-3"
+RUN_CONFIG_VERSION = "p3-run-config-4"
 RUN_MANIFEST_VERSION = "p3-run-manifest-3"
 JUDGE_REQUEST_VERSION = "p3-judge-request-2"
 RUN_RESULT_VERSION = "p3-run-result-5"
 PARSER_VERSION = "p3-binary-json-verdict-1"
 STRUCTURED_PARSER_VERSION = "p3-structured-validity-1"
+STRUCTURED_PARSER_VERSION_V2 = "p3-structured-validity-2"
 BINARY_RESPONSE_CONTRACT = "binary-verdict-v1"
 STRUCTURED_RESPONSE_CONTRACT = "structured-validity-v1"
+STRUCTURED_RESPONSE_CONTRACT_V2 = "structured-validity-v2"
 
 
 class BaselineKind(str, Enum):
@@ -381,9 +383,13 @@ class JudgeRequest:
             raise ContractError("judge request turns must be unique and chronological")
         if any(turn.turn_index >= self.action_turn_index for turn in self.conversation):
             raise ContractError("judge request turns must precede the action decision point")
-        if self.response_contract_version not in {BINARY_RESPONSE_CONTRACT, STRUCTURED_RESPONSE_CONTRACT}:
+        if self.response_contract_version not in {
+            BINARY_RESPONSE_CONTRACT,
+            STRUCTURED_RESPONSE_CONTRACT,
+            STRUCTURED_RESPONSE_CONTRACT_V2,
+        }:
             raise ContractError("unsupported response contract version")
-        if self.response_contract_version == STRUCTURED_RESPONSE_CONTRACT and self.baseline != BaselineKind.STRUCTURED_SINGLE_CALL.value:
+        if self.response_contract_version in {STRUCTURED_RESPONSE_CONTRACT, STRUCTURED_RESPONSE_CONTRACT_V2} and self.baseline != BaselineKind.STRUCTURED_SINGLE_CALL.value:
             raise ContractError("structured response contract is reserved for the single-call structured baseline")
         if self.response_contract_version == BINARY_RESPONSE_CONTRACT and self.baseline == BaselineKind.STRUCTURED_SINGLE_CALL.value:
             raise ContractError("single-call structured baseline requires its structured response contract")
@@ -462,6 +468,33 @@ def response_schema(contract_version: str) -> dict[str, object]:
                                 "type": "string",
                                 "enum": ["satisfied", "violated", "not_applicable"],
                             },
+                            "source_turn_indices": {"type": "array", "items": {"type": "integer"}, "minItems": 1},
+                        },
+                        "required": ["constraint_type", "assessment", "source_turn_indices"],
+                        "additionalProperties": False,
+                    },
+                },
+                "verdict": verdict,
+            },
+            "required": ["tool_contract", "constraint_assessments", "verdict"],
+            "additionalProperties": False,
+        }
+    if contract_version == STRUCTURED_RESPONSE_CONTRACT_V2:
+        return {
+            "type": "object",
+            "properties": {
+                "tool_contract": {"type": "string", "enum": ["satisfied", "violated"]},
+                "constraint_assessments": {
+                    "type": "array",
+                    "minItems": 0,
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "constraint_type": {
+                                "type": "string",
+                                "enum": ["numerical", "temporal", "permission", "other"],
+                            },
+                            "assessment": {"type": "string", "enum": ["satisfied", "violated"]},
                             "source_turn_indices": {"type": "array", "items": {"type": "integer"}, "minItems": 1},
                         },
                         "required": ["constraint_type", "assessment", "source_turn_indices"],
@@ -565,8 +598,11 @@ def parse_structured_verdict_response(
     action_turn_index: int,
     observed_turn_indices: Sequence[int] | None = None,
     provider_refused: bool = False,
+    contract_version: str = STRUCTURED_RESPONSE_CONTRACT,
 ) -> ParseResult:
     """Strictly parse structured assessments and enforce their binary aggregation rule."""
+    if contract_version not in {STRUCTURED_RESPONSE_CONTRACT, STRUCTURED_RESPONSE_CONTRACT_V2}:
+        raise ContractError("unsupported structured response contract version")
     if type(action_turn_index) is not int or action_turn_index < 1:
         raise ContractError("action_turn_index must be positive for structured verdict parsing")
     if observed_turn_indices is None:
@@ -605,7 +641,8 @@ def parse_structured_verdict_response(
         constraint_type, assessment, turn_indices = row["constraint_type"], row["assessment"], row["source_turn_indices"]
         if not isinstance(constraint_type, str) or constraint_type not in {"numerical", "temporal", "permission", "other"}:
             return ParseResult(ParseStatus.INVALID_OUTPUT)
-        if not isinstance(assessment, str) or assessment not in {"satisfied", "violated", "not_applicable"}:
+        allowed_assessments = {"satisfied", "violated"} if contract_version == STRUCTURED_RESPONSE_CONTRACT_V2 else {"satisfied", "violated", "not_applicable"}
+        if not isinstance(assessment, str) or assessment not in allowed_assessments:
             return ParseResult(ParseStatus.INVALID_OUTPUT)
         if not isinstance(turn_indices, list) or not turn_indices or any(
             type(index) is not int or index not in allowed_turns for index in turn_indices
@@ -725,6 +762,7 @@ class RunConfig:
     aggregation_version: str = "single-binary-verdict-1"
     config_version: str = RUN_CONFIG_VERSION
     parser_version: str = PARSER_VERSION
+    response_contract_version: str | None = None
 
     def __post_init__(self) -> None:
         try:
@@ -740,10 +778,21 @@ class RunConfig:
             raise ContractError("run config and parser versions are required")
         _validate_parameter_pairs(self.decoding_parameters, "decoding parameters")
         if self.baseline == BaselineKind.STRUCTURED_SINGLE_CALL.value:
-            if self.parser_version != STRUCTURED_PARSER_VERSION:
-                raise ContractError("single-call structured baseline requires its versioned parser")
-            if self.aggregation_version != "single-structured-verdict-1":
+            structured_versions = {
+                STRUCTURED_PARSER_VERSION: (STRUCTURED_RESPONSE_CONTRACT, "single-structured-verdict-1"),
+                STRUCTURED_PARSER_VERSION_V2: (STRUCTURED_RESPONSE_CONTRACT_V2, "single-structured-verdict-2"),
+            }
+            if self.parser_version not in structured_versions:
+                raise ContractError("single-call structured baseline requires a supported versioned parser")
+            expected_contract, expected_aggregation = structured_versions[self.parser_version]
+            if self.aggregation_version != expected_aggregation:
                 raise ContractError("single-call structured baseline requires its versioned verdict rule")
+            if self.response_contract_version not in {None, expected_contract}:
+                raise ContractError("structured run response contract does not match its parser")
+        else:
+            expected_contract = BINARY_RESPONSE_CONTRACT
+            if self.response_contract_version not in {None, expected_contract}:
+                raise ContractError("ordinary binary baselines require the binary response contract")
         if self.baseline == BaselineKind.TRANSLATION_FIRST.value and self.translation is None:
             raise ContractError("translation-first run configuration requires translation settings")
         if self.baseline != BaselineKind.TRANSLATION_FIRST.value and self.translation is not None:
@@ -764,6 +813,7 @@ class RunConfig:
             "translation": self.translation.to_record() if self.translation else None,
             "decoding_parameters": dict(self.decoding_parameters),
             "parser_version": self.parser_version,
+            "response_contract_version": self.effective_response_contract_version,
             "retry_policy": self.retry_policy.to_record(),
             "random_seed": self.random_seed,
             "input_manifest_sha256": self.input_manifest_sha256,
@@ -773,6 +823,14 @@ class RunConfig:
     @property
     def config_hash(self) -> str:
         return hashlib.sha256(canonical_json(self.to_record()).encode("utf-8")).hexdigest()
+
+    @property
+    def effective_response_contract_version(self) -> str:
+        if self.response_contract_version is not None:
+            return self.response_contract_version
+        if self.baseline == BaselineKind.STRUCTURED_SINGLE_CALL.value:
+            return STRUCTURED_RESPONSE_CONTRACT_V2 if self.parser_version == STRUCTURED_PARSER_VERSION_V2 else STRUCTURED_RESPONSE_CONTRACT
+        return BINARY_RESPONSE_CONTRACT
 
     @property
     def run_id(self) -> str:
@@ -1013,9 +1071,7 @@ class JudgeExecutor:
         if any(request.baseline != self.config.baseline for request in plan.requests):
             raise ContractError("judge request baseline does not match run configuration")
         expected_contract = (
-            STRUCTURED_RESPONSE_CONTRACT
-            if self.config.baseline == BaselineKind.STRUCTURED_SINGLE_CALL.value
-            else BINARY_RESPONSE_CONTRACT
+            self.config.effective_response_contract_version
         )
         if any(request.response_contract_version != expected_contract for request in plan.requests):
             raise ContractError("judge request output contract does not match its baseline")
@@ -1085,12 +1141,13 @@ class JudgeExecutor:
             end = self.clock_ns()
             if response.response_incomplete:
                 final_result = ParseResult(ParseStatus.INVALID_OUTPUT)
-            elif request.response_contract_version == STRUCTURED_RESPONSE_CONTRACT:
+            elif request.response_contract_version in {STRUCTURED_RESPONSE_CONTRACT, STRUCTURED_RESPONSE_CONTRACT_V2}:
                 final_result = parse_structured_verdict_response(
                     response.raw_response,
                     action_turn_index=request.action_turn_index,
                     observed_turn_indices=tuple(turn.turn_index for turn in request.conversation),
                     provider_refused=response.refused,
+                    contract_version=request.response_contract_version,
                 )
             else:
                 final_result = parse_verdict_response(response.raw_response, provider_refused=response.refused)

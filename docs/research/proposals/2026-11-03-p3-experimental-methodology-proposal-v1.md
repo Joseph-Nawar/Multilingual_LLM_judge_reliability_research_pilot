@@ -3,6 +3,8 @@
 **Status:** DRAFT FOR RESEARCH-OWNER DECISION — not an approved model, baseline, prompt, translation procedure, screening rule, or run plan.
 **Evidence checked:** 2026-11-03. Recheck availability, versioning, pricing, and terms before any later purchase or freeze.
 
+**Subsequent accounting correction (2026-11-06):** The 288 Arabic-bearing items stated below are not 288 translator provider calls. Translation runs per Arabic turn; use the sum of Arabic turns across translation-eligible items, then add actual retry attempts. See the [P3 Local Method Stabilization proposal](2026-11-06-p3-local-method-stabilization-proposal.md). This historical cost proposal and its translation-call assumptions are superseded.
+
 This proposal follows the research protocol, evaluation plan, and integrity requirements. It uses only public documentation and authored infrastructure; it does not inspect private examples or use study labels. The locked sample remains 288 primary items plus 96 separate auxiliary controls. No model call is authorized here.
 
 ## A. Model candidates
@@ -37,11 +39,11 @@ All three are draft proposals. Every judge stage receives the same evidence fiel
 
 ### 2. Translation-first judging
 
-- **Translation input:** one complete conversation per item, as turn-indexed `{speaker, turn_index, language, text}` records. The translator sees no action, tool schema, state, or label. Translate the 288 Arabic-bearing variants to English; pass through the 96 EN–EN variants without a translator call. The judge receives the resulting English conversation plus the exact same structured action, public schema, and instruction as the direct baseline.
+- **Translation input:** one complete conversation per item, as turn-indexed `{speaker, turn_index, language, text}` records. The translator sees no action, tool schema, state, or label. Translate the 288 Arabic-bearing items to English; pass through the 96 EN–EN items without translation. The translator makes one provider call per Arabic turn, so the provider-call count is the total eligible Arabic turns plus actual retries, not 288 by default. The judge receives the resulting English conversation plus the exact same structured action, public schema, and instruction as the direct baseline.
 - **Translation constraints:** do not add, infer, summarize, merge, split, reorder, or omit turns. Preserve speaker roles and chronology exactly. Keep names, IDs, code-like literals, numbers, units, dates, time zones, currencies, and quoted strings unchanged. Translate permission modality, negation, quantifiers, comparisons, scope, and constraint direction faithfully. Return the same count of turns and the same turn indexes/speakers; include protected literal spans for audit. Translation quality needs separate bilingual checks on non-study material before use.
 - **Output / parser:** translation output must satisfy the structural turn contract before a judge call is built. The judge uses the same strict binary JSON contract as direct judging. A failed or structurally invalid translation is a translation-stage failure, not a judge verdict: retain all attempts, do not judge source/partial text, and report the item as missing unless a separately approved scoring rule says otherwise.
 - **Decoding / failure:** version the translator, prompt, pivot, decoding, literal-preservation procedure, and retry/failure policy separately from the judge. Proposed maximum is two translator attempts total, with one retry only for listed transient technical categories. Invalid translation structure is not retried by default. On exhaustion, persist the failed attempts and skip judging; no fallback to direct judging.
-- **Calls:** 1 judge call per item; 288 translation calls for Arabic-bearing variants and no translator call for EN–EN. Share the single approved translation output across judge backbones, and record translator cost separately.
+- **Calls:** 1 judge call per item. Translation calls equal the Arabic-turn count across eligible items plus actual retries; 288 is the count of Arabic-bearing items, not an assumed provider-call count. Share successful hash-bound translations across judge backbones, and record translator attempts separately.
 
 ### 3. Structured/decomposed judging
 
@@ -86,7 +88,7 @@ Token assumptions include fixed instructions and schemas. Charged output include
 | Translation-first judge calls | 384 |
 | Structured/decomposed judging | 1,152 (three criteria × 384 items) |
 | **Judge calls total** | **1,920** |
-| Shared translation-first translation | 288 Arabic-bearing locked items, plus 24 independent translator-screen calls |
+| Shared translation-first translation | 288 Arabic-bearing locked items plus 24 optional independent translation-QC items; provider calls are based on Arabic turns, plus retries |
 | Judge competence screen | 48 per candidate model |
 
 Per-backbone judge cost, including its 48-item competence screen, is estimated at:
