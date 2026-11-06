@@ -529,3 +529,23 @@ def test_smoke_structured_config_sets_the_required_versioned_parser():
     )
 
     assert config.parser_version == STRUCTURED_PARSER_VERSION
+
+
+def test_smoke_memory_sampler_tracks_ollama_llama_server_process(monkeypatch):
+    import time
+
+    from scripts import p3_local_compatibility_smoke as smoke
+
+    monkeypatch.setattr(
+        smoke,
+        "_run_command",
+        lambda args: "4953 6268624 /Applications/Ollama.app/Contents/Resources/llama-server --model local.gguf",
+    )
+    sampler = smoke.RunnerMemorySampler(interval_seconds=0.01).start()
+    deadline = time.monotonic() + 1
+    while sampler.sample_count == 0 and time.monotonic() < deadline:
+        time.sleep(0.001)
+    result = sampler.stop()
+
+    assert result["ollama_process_peak_rss_bytes"] == 6_268_624 * 1024
+    assert result["pids"] == [4953]

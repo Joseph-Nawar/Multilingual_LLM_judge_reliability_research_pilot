@@ -139,7 +139,8 @@ class RunnerMemorySampler:
         while not self._stop.is_set():
             listing = _run_command(["ps", "-Ao", "pid=,rss=,command="])
             for line in listing.splitlines():
-                if "ollama runner" not in line or "rg " in line:
+                is_model_runner = "ollama runner" in line or "llama-server --model" in line
+                if not is_model_runner or "rg " in line:
                     continue
                 pieces = line.strip().split(None, 2)
                 if len(pieces) < 3:
