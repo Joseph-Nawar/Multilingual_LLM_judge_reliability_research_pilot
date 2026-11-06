@@ -531,6 +531,109 @@ def test_smoke_structured_config_sets_the_required_versioned_parser():
     assert config.parser_version == STRUCTURED_PARSER_VERSION
 
 
+def test_smoke_structured_scoring_separates_semantics_evidence_and_exact_turns():
+    from scripts import p3_local_compatibility_smoke as smoke
+    from p3_local_smoke_fixtures import CASES
+
+    score = smoke._score_structured_assessment(
+        {
+            "status": "parsed",
+            "constraint_assessments": [
+                {
+                    "constraint_type": "numerical",
+                    "assessment": "satisfied",
+                    "source_turn_indices": [0, 1],
+                }
+            ],
+        },
+        CASES["numeric-revision"],
+    )
+
+    assert score == {
+        "expected_constraint_type_present": True,
+        "expected_assessment_correct": True,
+        "supporting_evidence_valid": True,
+        "exact_turn_index_match": False,
+        "semantic_assessment_with_valid_evidence": True,
+        "exact_assessment_match": False,
+    }
+
+
+def test_smoke_structured_scoring_requires_both_turns_for_relative_reference():
+    from scripts import p3_local_compatibility_smoke as smoke
+    from p3_local_smoke_fixtures import CASES
+
+    score = smoke._score_structured_assessment(
+        {
+            "status": "parsed",
+            "constraint_assessments": [
+                {
+                    "constraint_type": "temporal",
+                    "assessment": "satisfied",
+                    "source_turn_indices": [1],
+                }
+            ],
+        },
+        CASES["relative-time-revision"],
+    )
+
+    assert score["expected_constraint_type_present"] is True
+    assert score["expected_assessment_correct"] is True
+    assert score["supporting_evidence_valid"] is False
+    assert score["exact_turn_index_match"] is False
+    assert score["semantic_assessment_with_valid_evidence"] is False
+
+
+def test_smoke_structured_scoring_does_not_conflate_exact_citation_with_correct_status():
+    from scripts import p3_local_compatibility_smoke as smoke
+    from p3_local_smoke_fixtures import CASES
+
+    score = smoke._score_structured_assessment(
+        {
+            "status": "parsed",
+            "constraint_assessments": [
+                {
+                    "constraint_type": "temporal",
+                    "assessment": "violated",
+                    "source_turn_indices": [0, 1],
+                }
+            ],
+        },
+        CASES["relative-time-revision"],
+    )
+
+    assert score["expected_constraint_type_present"] is True
+    assert score["expected_assessment_correct"] is False
+    assert score["supporting_evidence_valid"] is True
+    assert score["exact_turn_index_match"] is True
+    assert score["semantic_assessment_with_valid_evidence"] is False
+    assert score["exact_assessment_match"] is False
+
+
+def test_smoke_structured_scoring_does_not_count_not_applicable_as_detected_type():
+    from scripts import p3_local_compatibility_smoke as smoke
+    from p3_local_smoke_fixtures import CASES
+
+    score = smoke._score_structured_assessment(
+        {
+            "status": "parsed",
+            "constraint_assessments": [
+                {
+                    "constraint_type": "temporal",
+                    "assessment": "not_applicable",
+                    "source_turn_indices": [0, 1],
+                }
+            ],
+        },
+        CASES["relative-time-revision"],
+    )
+
+    assert score["expected_constraint_type_present"] is False
+    assert score["expected_assessment_correct"] is False
+    assert score["supporting_evidence_valid"] is False
+    assert score["exact_turn_index_match"] is False
+
+
 def test_smoke_memory_sampler_tracks_ollama_llama_server_process(monkeypatch):
     import time
 

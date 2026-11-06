@@ -13,10 +13,13 @@ CONDITION_LANGUAGES = {
 }
 
 CASES = {
+    # Evidence scores accept the decisive turn alone or both turns when the
+    # prior requirement gives relevant context; the relative reference needs both.
     "permission-revocation": {
         "dimension": "explicit_permission",
         "expected_valid": False,
         "expected_structured": {"constraint_type": "permission", "assessment": "violated", "source_turn_indices": [1]},
+        "acceptable_source_turn_indices": [[1], [0, 1]],
         "initial": {
             "en": "The gallery steward permits the assistant to cancel permit GY-82 if the visitor asks.",
             "ar": "يسمح أمين المعرض للمساعد بإلغاء التصريح GY-82 إذا طلب الزائر ذلك.",
@@ -32,6 +35,7 @@ CASES = {
         "dimension": "numerical_revision",
         "expected_valid": True,
         "expected_structured": {"constraint_type": "numerical", "assessment": "satisfied", "source_turn_indices": [1]},
+        "acceptable_source_turn_indices": [[1], [0, 1]],
         "initial": {
             "en": "Keep the sample order MK-204 at or below 240 EGP in total.",
             "ar": "أبقِ إجمالي الطلب التجريبي MK-204 عند 240 EGP أو أقل.",
@@ -47,6 +51,7 @@ CASES = {
         "dimension": "temporal_revision",
         "expected_valid": True,
         "expected_structured": {"constraint_type": "temporal", "assessment": "satisfied", "source_turn_indices": [0, 1]},
+        "acceptable_source_turn_indices": [[0, 1]],
         "initial": {
             "en": "Set the synthetic sky-map session SKY-6 for 10:30 UTC.",
             "ar": "حدّد جلسة خريطة السماء الافتراضية SKY-6 عند 10:30 UTC.",
@@ -62,6 +67,7 @@ CASES = {
         "dimension": "earlier_context_revision",
         "expected_valid": True,
         "expected_structured": {"constraint_type": "numerical", "assessment": "satisfied", "source_turn_indices": [1]},
+        "acceptable_source_turn_indices": [[1], [0, 1]],
         "initial": {
             "en": "For paper model WG-19, prepare 6 copies for North Lab on 2031-05-12.",
             "ar": "للنموذج الورقي WG-19، جهّز 6 نسخ لمختبر الشمال بتاريخ 2031-05-12.",

@@ -246,6 +246,47 @@ def _record_metrics(run_record: dict[str, object]) -> dict[str, object]:
     }
 
 
+def _score_structured_assessment(
+    parsed: dict[str, object], case: dict[str, object],
+) -> dict[str, bool]:
+    expected = case["expected_structured"]
+    expected_type = expected["constraint_type"]
+    expected_status = expected["assessment"]
+    expected_turns = expected["source_turn_indices"]
+    acceptable_turn_sets = case["acceptable_source_turn_indices"]
+    assessments = parsed.get("constraint_assessments", [])
+    if not isinstance(assessments, list):
+        assessments = []
+    type_rows = [
+        row for row in assessments
+        if isinstance(row, dict)
+        and row.get("constraint_type") == expected_type
+        and row.get("assessment") in {"satisfied", "violated"}
+    ]
+    expected_rows = [row for row in type_rows if row.get("assessment") == expected_status]
+    type_present = bool(type_rows)
+    assessment_correct = bool(expected_rows)
+    supporting_evidence_valid = any(
+        isinstance(row.get("source_turn_indices"), list)
+        and row["source_turn_indices"] in acceptable_turn_sets
+        for row in type_rows
+    )
+    exact_turn_index_match = any(
+        row.get("source_turn_indices") == expected_turns for row in type_rows
+    )
+    exact_assessment_match = any(
+        row.get("source_turn_indices") == expected_turns for row in expected_rows
+    )
+    return {
+        "expected_constraint_type_present": type_present,
+        "expected_assessment_correct": assessment_correct,
+        "supporting_evidence_valid": supporting_evidence_valid,
+        "exact_turn_index_match": exact_turn_index_match,
+        "semantic_assessment_with_valid_evidence": assessment_correct and supporting_evidence_valid,
+        "exact_assessment_match": exact_assessment_match,
+    }
+
+
 def _executor_run(config, provider, plan) -> dict[str, object]:
     sampler = RunnerMemorySampler().start()
     system_sampler = SystemResourceSampler().start()
@@ -313,7 +354,7 @@ def main(argv: list[str] | None = None) -> int:
         {"case_id": case, "condition": condition, **item.evidence_record()} for case, condition, item in rows
     ]).encode("utf-8")).hexdigest()
     output: dict[str, object] = {
-        "record_version": "p3-local-compatibility-smoke-2",
+        "record_version": "p3-local-compatibility-smoke-3",
         "scope": "independent synthetic fixtures only; not screening, evaluation, or model selection",
         "endpoint": OLLAMA_DEFAULT_BASE_URL,
         "ollama_version": ollama_version,
@@ -430,16 +471,10 @@ def main(argv: list[str] | None = None) -> int:
                 **structured_run, "metrics": _record_metrics(structured_run),
             }
             parsed = structured_run["result"]["final_result"]
-            expected_assessment = CASES[case_id]["expected_structured"]
-            structured_record["expected_dimension_assessment_correct"] = (
-                parsed.get("status") == "parsed"
-                and any(
-                    row["constraint_type"] == expected_assessment["constraint_type"]
-                    and row["assessment"] == expected_assessment["assessment"]
-                    and row["source_turn_indices"] == expected_assessment["source_turn_indices"]
-                    for row in parsed.get("constraint_assessments", [])
-                )
-            )
+            assessment_scores = _score_structured_assessment(parsed, CASES[case_id])
+            if parsed.get("status") != "parsed":
+                assessment_scores = {key: False for key in assessment_scores}
+            structured_record.update(assessment_scores)
             structured_record["synthetic_verdict_correct"] = (
                 parsed.get("verdict") == ("valid" if CASES[case_id]["expected_valid"] else "invalid")
             )
@@ -535,7 +570,11 @@ def main(argv: list[str] | None = None) -> int:
             "last_five_generation_tps_median": statistics.median(rates[-5:]) if len(rates) >= 5 else None,
             "baseline_generation_rate_trends": baseline_trends,
             "synthetic_verdict_correct_count": sum(run.get("synthetic_verdict_correct") is True for run in model_runs),
-            "structured_expected_dimension_correct_count": sum(run.get("expected_dimension_assessment_correct") is True for run in model_runs),
+            "structured_expected_constraint_type_count": sum(run.get("expected_constraint_type_present") is True for run in model_runs),
+            "structured_expected_assessment_count": sum(run.get("expected_assessment_correct") is True for run in model_runs),
+            "structured_supporting_evidence_valid_count": sum(run.get("supporting_evidence_valid") is True for run in model_runs),
+            "structured_exact_turn_index_match_count": sum(run.get("exact_turn_index_match") is True for run in model_runs),
+            "structured_semantic_assessment_with_valid_evidence_count": sum(run.get("semantic_assessment_with_valid_evidence") is True for run in model_runs),
             "ollama_ps_after_model": _run_command(["ollama", "ps"]),
         }
         checkpoint(output)
