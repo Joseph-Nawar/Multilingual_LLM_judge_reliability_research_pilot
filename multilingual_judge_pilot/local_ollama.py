@@ -135,7 +135,7 @@ class OllamaLocalClient:
         self._opener = build_opener(ProxyHandler({}), _NoRedirectHandler())
 
     def _json_request(self, method: str, path: str, payload: Mapping[str, object] | None = None) -> dict[str, object]:
-        if path not in {"/api/version", "/api/tags", "/api/show", "/api/chat"}:
+        if path not in {"/api/version", "/api/tags", "/api/show", "/api/chat", "/api/ps"}:
             raise ContractError("unsupported Ollama local API path")
         data = None if payload is None else canonical_json(payload).encode("utf-8")
         request = Request(
@@ -166,6 +166,21 @@ class OllamaLocalClient:
 
     def get_version(self) -> dict[str, object]:
         return self._json_request("GET", "/api/version")
+
+    def list_running_models(self) -> tuple[str, ...]:
+        """Return model names active in this local Ollama server."""
+        response = self._json_request("GET", "/api/ps")
+        models = response.get("models")
+        if not isinstance(models, list):
+            raise OllamaLocalError("invalid_running_model_inventory")
+        names = []
+        for row in models:
+            if not isinstance(row, dict) or not isinstance(row.get("name"), str) or not row["name"]:
+                raise OllamaLocalError("invalid_running_model_inventory")
+            names.append(row["name"])
+        if len(names) != len(set(names)):
+            raise OllamaLocalError("duplicate_running_model_inventory")
+        return tuple(sorted(names))
 
     def discover_model(self, model_tag: str, *, diagnostic_only: bool = False) -> OllamaModelDescriptor:
         _approved_model_tag(model_tag, diagnostic_only=diagnostic_only)

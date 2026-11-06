@@ -1,4 +1,9 @@
-"""Unapproved, versioned prompt candidates for local P3 method review."""
+"""Versioned P3 prompt candidates accepted for qualification preparation.
+
+The research owner has approved V2 for the competence-screen configuration.
+These prompts do not by themselves authorize study inference or constitute a
+frozen study-wide methodology.
+"""
 
 from __future__ import annotations
 
