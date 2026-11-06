@@ -1,6 +1,6 @@
 # P3 Local Inference Compatibility — Progress Report
 
-**Status: adapter and synthetic-test preparation complete; model compatibility smoke not run.** This is a progress report for the research-owner gate, not model qualification or authorization for study inference. No study examples, locked labels, or private review materials were accessed.
+**Historical snapshot from 2026-11-04; superseded on 2026-11-06.** At the time of this report the approved models had not finished downloading. The three approved local artifacts were subsequently installed and bounded synthetic compatibility tests were completed. Current findings and limitations are in the [P3 Local Method Stabilization proposal](2026-11-06-p3-local-method-stabilization-proposal.md). This historical report is not model qualification or authorization for study inference; no study examples, locked labels, or private review materials were accessed during the later compatibility work either.
 
 ## Environment verified
 
