@@ -1,6 +1,6 @@
 # Evaluation and statistical-analysis plan
 
-**Status:** P0 analysis specification amended after the 2026-10-29 research-owner audit. The 60-scenario P2C authoring package and deterministic checks are complete in private storage; the dataset, prompts, and analysis are not frozen, and no inference is authorized.
+**Status:** The research owner authorized the full study on 2026-11-11 using Gemma 4 12B and direct, translation-first, and single-call structured baselines. The dataset and run configurations are not frozen. The commissioned bilingual-review submissions are unavailable in the private review package, so locked inference remains blocked until the existing validation and pre-inference freeze steps are complete.
 
 **Primary target:** validity classification by an LLM judge, not agent task completion.
 
@@ -18,21 +18,23 @@ The primary complexity allocation refers specifically to **decisive-update depen
 
 At the separately reviewed freeze step, assign each item an opaque random UUIDv4 that does not encode validity, history position, language condition, domain, transition family, partition, scenario, or template/recipe. Keep its reference mapping outside the judge-access path. This is a design requirement only; P2B-1 creates no study item IDs.
 
-Proposed reproducible run order, subject to research-owner approval before P3/P4: freeze and hash the complete item manifest; generate a 256-bit run seed before inference; record the seed and an immutable order-algorithm version in the private run manifest; compute `SHA-256(seed_bytes || 0x00 || UTF8(item_id))` for each opaque ID; sort ascending by digest, breaking any tie by the opaque ID. Use the same precomputed order for all baseline methods in a paired run, invoke each item in an isolated context, and do not group by history, label, language condition, or scenario. Record the exact ordered opaque-ID list and its hash. The seed and map remain reference-side metadata. This deterministic randomization policy is prospective and has not been implemented or frozen.
+Reproducible run order: after human validation and immediately before the pre-inference freeze, freeze and hash the complete item manifest; generate a 256-bit run seed; record the seed and an immutable order-algorithm version in the private run manifest; compute `SHA-256(seed_bytes || 0x00 || UTF8(item_id))` for each opaque ID; sort ascending by digest, breaking any tie by the opaque ID. Use the same precomputed order for all baseline methods in a paired run, invoke each item in an isolated context, and do not group by history, label, language condition, or scenario. Record the exact ordered opaque-ID list and its hash. The seed and item map remain reference-side metadata. No locked run order or manifest is frozen yet.
 
 Each ordinary judge input must contain only conversation turns with `turn_index < action_turn_index`, regardless of speaker role, plus the canonical structured action, public tool/schema information, fixed English judge instructions, and an opaque item ID. The structural validator links formal event turns to user turns and rejects turns at or after the action decision point; it does not truncate invalid histories. It cannot establish whether English or MSA text faithfully expresses those formal events. The public tool schema's required-parameter flags must match the rules enforced when validating the canonical action.
 
 The separate no-change control has 12 additional canonical scenarios and 96 items. It estimates language-condition behavior when a later turn restates an existing requirement without changing its effective meaning. Report its four condition estimates and any cross-language versus same-language error contrast separately as secondary exploratory results. A matched primary-versus-control contrast may be reported only as exploratory, with matched-set and template dependence retained. The small control does not fully identify a causal effect of constraint revision and never replaces the primary four-condition comparison.
 
-## Candidate mandatory ordinary-condition baselines
+## Approved ordinary-condition baselines
 
-These are candidate mandatory ordinary-condition baselines. Before the locked evaluation is frozen, the research owner must explicitly approve which of them are mandatory:
+The research owner approved these three ordinary-condition baselines for the full study, using Gemma 4 12B as the judge:
 
 1. **Direct multilingual judging:** judge the original English, Arabic, or mixed-language history using a frozen, fixed-language instruction and validity rubric.
 2. **Translation-first judging:** translate the user history to a designated pivot language, then judge it with the frozen rubric.
 3. **Structured/decomposed judging:** apply a frozen criteria-based protocol with specified criterion evidence and aggregation to the binary classification.
 
-If any candidate is omitted for cost or feasibility, document the reason and owner approval before locked evaluation and before unblinding. Record the resulting limit on H3's scope. Any method added after inspecting locked results is exploratory and must not support an unqualified preplanned H3 claim. Do not describe a baseline as a faithful reproduction of a published method unless its implementation has been checked against that method and the reproduction is documented.
+The approved baselines are direct multilingual judging with Direct Prompt V2; translation-first judging with the same judge prompt after TranslateGemma V3 contextual translation; and single-call structured judging with Structured Prompt V2 and structured-validity V2. Structured parsing remains strict with a 512-token output limit. Do not describe a baseline as a faithful reproduction of a published method unless its implementation has been checked against that method and the reproduction is documented. No baseline may be omitted or changed after locked results are inspected. Any method introduced after inspecting locked results is exploratory and cannot support an unqualified preplanned H3 claim.
+
+The TranslateGemma V3 prompt and model remain unchanged. Translation literal-validation policy V4 accepts only equivalent 12/24-hour representations of the same local clock time; dates, numeric timezone offsets, identifiers, currency codes, and all other numbers remain subject to strict preservation checks. It does not convert times across dates or time zones. Historical V3 failure records are retained unchanged. Automated literal checks do not establish semantic preservation of permission or negation meaning; the commissioned bilingual review remains required before freeze.
 
 For fairness:
 
@@ -79,7 +81,7 @@ Authoring templates and semantic recipes can induce dependence across canonical 
 
 Report scenario-clustered uncertainty for all four primary condition estimates and paired contrasts. A proposed bootstrap resamples canonical scenario IDs with all derivatives intact; for matched auxiliary contrasts, resample matched sets. Freeze interval method, resample count, and seed before locked evaluation. Do not resample individual items as independent observations.
 
-The primary locked set has 36 primary scenario clusters; the auxiliary control has only 12 more. The 384 locked items across both sets are not 384 independent observations. This is an exploratory feasibility pilot; do not invent a power calculation or describe it as confirmatory. Report effect estimates, uncertainty, missingness, baseline completeness, template dependence, and validity threats. Statistical significance alone is not a go/no-go criterion.
+The primary locked set has 36 primary scenario clusters; the auxiliary control has only 12 more. The 384 locked items across both sets are not 384 independent observations. The full study remains exploratory and cannot support confirmatory or population-general claims. Do not invent a power calculation. Report effect estimates, uncertainty, missingness, baseline completeness, template dependence, and validity threats. Statistical significance alone is not a go/no-go criterion.
 
 ## Invalid, missing, and failed outputs
 

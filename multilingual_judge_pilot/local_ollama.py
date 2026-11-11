@@ -27,6 +27,8 @@ from .judge_inference import (
     ProviderIdentity,
     ProviderResponse,
     TranslationConfig,
+    TRANSLATION_LITERAL_VALIDATION_POLICY_V3,
+    TRANSLATION_LITERAL_VALIDATION_POLICY_V4,
     canonical_json,
     response_schema,
     _check_forbidden_mapping_keys,
@@ -423,6 +425,75 @@ def _literal_preservation_failures_v3(source: str, translated: str) -> dict[str,
     }
 
 
+_CLOCK_PATTERN_V4 = re.compile(
+    r"(?<![\d+\-/])(?P<clock>\d{1,2}:\d{2}(?::\d{2})?)"
+    r"(?:[ \t]*(?P<meridiem>AM|PM|A\.M\.|P\.M\.|صباح(?:اً|ً|ا)?|مساء(?:اً|ً|ا)?|ص\.?|م\.?)(?![\w]))?"
+    r"(?!\d)",
+    re.IGNORECASE,
+)
+
+
+def _clock_seconds_v4(match: re.Match[str]) -> int | None:
+    digits = "".join(str(unicodedata.digit(char)) if char.isdigit() else char for char in match.group("clock"))
+    parts = [int(part) for part in digits.split(":")]
+    hour, minute = parts[:2]
+    second = parts[2] if len(parts) == 3 else 0
+    if minute > 59 or second > 59:
+        return None
+
+    meridiem = (match.group("meridiem") or "").casefold().replace(".", "").strip()
+    if meridiem:
+        is_pm = meridiem in {"pm", "مساء", "مساءً", "مساءا", "م"}
+        is_am = meridiem in {"am", "صباح", "صباحًا", "صباحا", "ص"}
+        if not (is_pm or is_am) or not 1 <= hour <= 12:
+            return None
+        hour = (hour % 12) + (12 if is_pm else 0)
+    elif not 0 <= hour <= 23:
+        return None
+    return hour * 3600 + minute * 60 + second
+
+
+def _literal_preservation_check_v4(source: str, translated: str) -> dict[str, object]:
+    """Check V3 literals while allowing only equivalent 12/24-hour clock notation.
+
+    Clock digits are removed from the general number comparison only after both
+    sides yield the same ordered local clock values. Dates and numeric timezone
+    offsets remain in the strict number/identifier comparisons, so this rule
+    does not convert between dates or time zones.
+    """
+    def clocks(text: str) -> list[tuple[re.Match[str], int | None]]:
+        return [(match, _clock_seconds_v4(match)) for match in _CLOCK_PATTERN_V4.finditer(text)]
+
+    source_clocks = clocks(source)
+    target_clocks = clocks(translated)
+    temporal_mismatch: list[str] = []
+    equivalence_matches: list[dict[str, object]] = []
+    if len(source_clocks) != len(target_clocks):
+        temporal_mismatch.append(f"clock_count:{len(source_clocks)}!={len(target_clocks)}")
+    for (source_match, source_seconds), (target_match, target_seconds) in zip(source_clocks, target_clocks):
+        if source_seconds is None or target_seconds is None:
+            temporal_mismatch.append(f"unrecognized_clock:{source_match.group(0).strip()}|{target_match.group(0).strip()}")
+        elif source_seconds != target_seconds:
+            temporal_mismatch.append(f"clock_value:{source_match.group(0).strip()}!={target_match.group(0).strip()}")
+        else:
+            equivalence_matches.append(
+                {
+                    "source": source_match.group(0).strip(),
+                    "translated": target_match.group(0).strip(),
+                    "seconds_from_midnight": source_seconds,
+                }
+            )
+
+    # Reuse the existing V3 number, identifier, and currency checks after
+    # removing only parsed clock tokens. Other numeric/time-zone context stays
+    # present for the strict check.
+    without_source_clocks = _CLOCK_PATTERN_V4.sub(" ", source)
+    without_target_clocks = _CLOCK_PATTERN_V4.sub(" ", translated)
+    failures = _literal_preservation_failures_v3(without_source_clocks, without_target_clocks)
+    failures["temporal_mismatch"] = temporal_mismatch
+    return {"failures": failures, "time_equivalence_matches": equivalence_matches}
+
+
 def _utc_now() -> str:
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
@@ -521,6 +592,7 @@ class OllamaLocalTranslator:
             response: dict[str, object] | None = None
             literal_preservation_status = "protected_and_restored" if not contextual_unshielded else "pending"
             literal_failures: dict[str, list[str]] = {"missing": [], "unexpected": []}
+            time_equivalence_matches: list[dict[str, object]] = []
             failure: str | None = None
             try:
                 body: dict[str, object] = {
@@ -546,11 +618,14 @@ class OllamaLocalTranslator:
                     raise OllamaLocalError("translation_output_incomplete", raw_response=raw_response)
                 translated = raw_response.strip() if contextual_unshielded else _restore_literals(raw_response.strip(), literals)
                 if contextual_unshielded:
-                    literal_failures = (
-                        _literal_preservation_failures_v3(turn.content, translated)
-                        if official_context_format
-                        else _literal_preservation_failures(turn.content, translated)
-                    )
+                    if official_context_format and config.literal_validation_policy_version == TRANSLATION_LITERAL_VALIDATION_POLICY_V4:
+                        check = _literal_preservation_check_v4(turn.content, translated)
+                        literal_failures = check["failures"]
+                        time_equivalence_matches = check["time_equivalence_matches"]
+                    elif official_context_format and config.literal_validation_policy_version == TRANSLATION_LITERAL_VALIDATION_POLICY_V3:
+                        literal_failures = _literal_preservation_failures_v3(turn.content, translated)
+                    else:
+                        literal_failures = _literal_preservation_failures(turn.content, translated)
                     literal_preservation_status = "passed" if not any(literal_failures.values()) else "failed"
                     if literal_preservation_status == "failed":
                         raise ValueError("translation_literal_preservation_failure")
@@ -584,6 +659,7 @@ class OllamaLocalTranslator:
                         context_turn_indices=tuple(prior.turn_index for prior in preceding_turns),
                         literal_preservation_status=literal_preservation_status,
                         literal_preservation_failures=literal_failures,
+                        time_equivalence_matches=time_equivalence_matches,
                     )
                 )
                 raise TranslationCallError(
@@ -623,6 +699,7 @@ class OllamaLocalTranslator:
                     context_turn_indices=tuple(prior.turn_index for prior in preceding_turns),
                     literal_preservation_status=literal_preservation_status,
                     literal_preservation_failures=literal_failures,
+                    time_equivalence_matches=time_equivalence_matches,
                 )
             )
             raw_outputs.append({"turn_index": turn.turn_index, "raw_response": raw_response})
@@ -657,6 +734,7 @@ class OllamaLocalTranslator:
         context_turn_indices: tuple[int, ...] = (),
         literal_preservation_status: str = "not_applicable",
         literal_preservation_failures: Mapping[str, list[str]] | None = None,
+        time_equivalence_matches: list[dict[str, object]] | None = None,
     ) -> dict[str, object]:
         result = result or {}
         return {
@@ -664,6 +742,7 @@ class OllamaLocalTranslator:
             "call_id": call_id,
             "configuration_hash": config.config_hash,
             "translation_prompt_version": config.prompt_version,
+            "literal_validation_policy_version": config.literal_validation_policy_version,
             "input_id": item.item_id,
             "turn_index": turn_index,
             "input_sha256": input_hash,
@@ -689,4 +768,5 @@ class OllamaLocalTranslator:
             "input_context_turn_indices": list(context_turn_indices),
             "literal_preservation_status": literal_preservation_status,
             "literal_preservation_failures": dict(literal_preservation_failures or {"missing": [], "unexpected": []}),
+            "time_equivalence_matches": list(time_equivalence_matches or []),
         }

@@ -1,8 +1,8 @@
 # Research protocol and hypotheses
 
-**Status:** P0 specification amended after the 2026-10-29 research-owner audit; P1 passed independent review; P2A authoring feasibility passed; the four-scenario P2B feasibility pilot concluded with documented limitations. P2C authoring of the full 60-scenario corpus and deterministic package checks are complete under the later owner authorization. The protocol and dataset remain unfrozen; independent bilingual quality control and owner acceptance are outstanding.
+**Status:** P0–P2C authoring milestones and the bounded P3 feasibility work are complete. On 2026-11-11, the research owner authorized the full study using Gemma 4 12B and the three approved baselines. The dataset remains unfrozen and locked inference has not begun because the commissioned bilingual review submissions are not present; the existing human-validation and pre-inference freeze requirements remain in force.
 
-**Study type:** controlled exploratory feasibility pilot.
+**Study type:** full multilingual judge-reliability study with an exploratory design and scenario-clustered analysis.
 
 **Primary object:** the LLM judge's binary action-validity classification.
 
@@ -69,8 +69,8 @@ Ordinary judge inference and reference scoring use separated data-access paths. 
 
 ## Scope limits
 
-This pilot is a feasibility study over a small, controlled set of synthetic or authored scenarios, not a representative estimate of real-world judge reliability. The small no-change control cannot fully identify the causal effect of consequential revision. Shared authoring templates may induce dependence beyond canonical-scenario clustering. Exact baseline selection, translation/localization procedure, template-allocation feasibility, code-like literal policy, and H2 diagnostic protocol must be resolved at their roadmap gates. Negative or inconclusive results must be reported with the same care as positive results.
+The full study remains a small authored-scenario study, not a representative estimate of real-world judge reliability. The small no-change control cannot fully identify the causal effect of consequential revision. Shared authoring templates may induce dependence beyond canonical-scenario clustering. The research owner has selected Gemma 4 12B and approved the direct, translation-first, and single-call structured baselines; the translation checker uses a versioned conservative 12/24-hour equivalence rule. Negative or inconclusive results must be reported with the same care as positive results.
 
 ## Decisions for the P0 review gate
 
-The 2026-10-29 P0 decisions and P1 implementation review are recorded in their decision records. P2A feasibility and the P2B pilot closeout are recorded separately. The four-scenario pilot's semantic/linguistic assessments and unresolved dependence disagreements are distinct findings; it does not establish full-benchmark validity. The later P2C authorization permitted full dataset authoring and deterministic validation. The resulting 60 canonical scenarios, 120 histories, and 480 language items remain private. New P2C language variants await independent bilingual validation; the four previously pilot-reviewed scenarios retain their original assessments and unresolved dependence records. This authorization did not freeze the dataset or permit model inference.
+The 2026-10-29 P0 decisions and P1 implementation review are recorded in their decision records. P2A feasibility and the P2B pilot closeout are recorded separately. The four-scenario P2B pilot's semantic/linguistic assessments and unresolved dependence disagreements are distinct findings; it does not establish full-benchmark validity and remains closed. The later P2C authorization permitted full dataset authoring and deterministic validation. The resulting 60 canonical scenarios, 120 histories, and 480 language items remain private. New P2C language variants still require the already-commissioned independent bilingual validation. The 2026-11-11 full-study GO authorizes execution after that validation and a hash-bound pre-inference freeze; it does not waive either condition.

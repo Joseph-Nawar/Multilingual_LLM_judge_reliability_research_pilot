@@ -344,6 +344,71 @@ def test_v3_preservation_check_normalizes_digit_scripts_without_matching_prompt_
     }
 
 
+def test_v4_literal_checker_accepts_equivalent_12_and_24_hour_clock_notation():
+    from multilingual_judge_pilot.local_ollama import _literal_preservation_check_v4
+
+    result = _literal_preservation_check_v4(
+        "الموعد يوم ٦ أكتوبر ٢٠٢٧ الساعة ١٤:٠٠ UTC+02:00، والمرجع HJ-77.",
+        "The appointment is on 6 October 2027 at 2:00 PM UTC+02:00, reference HJ-77.",
+    )
+
+    assert not any(result["failures"].values())
+    assert result["time_equivalence_matches"] == [
+        {"source": "١٤:٠٠", "translated": "2:00 PM", "seconds_from_midnight": 50_400}
+    ]
+
+
+def test_v4_literal_checker_rejects_changed_clock_date_or_timezone_context():
+    from multilingual_judge_pilot.local_ollama import _literal_preservation_check_v4
+
+    changed_clock = _literal_preservation_check_v4("Meet at 14:00 UTC+02:00", "Meet at 2:30 PM UTC+02:00")
+    changed_date = _literal_preservation_check_v4(
+        "Meet on 2027-10-06 at 14:00 UTC+02:00", "Meet on 2027-10-07 at 2:00 PM UTC+02:00"
+    )
+    changed_zone = _literal_preservation_check_v4("Meet on 2027-10-06 at 14:00 UTC+02:00", "Meet on 2027-10-06 at 2:00 PM UTC+03:00")
+
+    assert changed_clock["failures"]["temporal_mismatch"]
+    assert any(changed_date["failures"].values())
+    assert any(changed_zone["failures"].values())
+
+
+def test_v4_clock_equivalence_does_not_exempt_other_numbers_identifiers_or_currency():
+    from multilingual_judge_pilot.local_ollama import _literal_preservation_check_v4
+
+    result = _literal_preservation_check_v4(
+        "Move booking HJ-77 from 14:00; amount 120 EUR.",
+        "Move booking HJ-78 from 2:00 PM; amount 121 EUR.",
+    )
+
+    failures = result["failures"]
+    assert failures["missing_identifiers"] == ["HJ-77"]
+    assert failures["unexpected_identifiers"] == ["HJ-78"]
+    assert failures["missing_numbers"] == ["120", "77"]
+    assert failures["unexpected_numbers"] == ["121", "78"]
+
+
+def test_translation_configuration_binds_literal_validation_policy_version():
+    from multilingual_judge_pilot.judge_inference import (
+        TRANSLATION_LITERAL_VALIDATION_POLICY_V3,
+        TRANSLATION_LITERAL_VALIDATION_POLICY_V4,
+        ProviderIdentity,
+        TranslationConfig,
+    )
+
+    base = dict(
+        translator=ProviderIdentity("ollama-local", "translategemma:4b-it-q4_K_M", "a" * 64),
+        pivot_language="en",
+        prompt_version="translategemma-contextual-unshielded-official-format-v3",
+        decoding_parameters=(("num_ctx", 4096), ("num_predict", 128), ("seed", 17), ("temperature", 0.0)),
+    )
+    current = TranslationConfig(**base)
+    prior = TranslationConfig(**base, literal_validation_policy_version=TRANSLATION_LITERAL_VALIDATION_POLICY_V3)
+
+    assert current.literal_validation_policy_version == TRANSLATION_LITERAL_VALIDATION_POLICY_V4
+    assert current.config_hash != prior.config_hash
+    assert current.to_record()["literal_validation_policy_version"] == TRANSLATION_LITERAL_VALIDATION_POLICY_V4
+
+
 def test_v3_contextual_translation_uses_official_prompt_shape_and_preserves_roles():
     from multilingual_judge_pilot.judge_inference import ConversationTurn, TranslationConfig, TranslationFacingInput
     from multilingual_judge_pilot.local_ollama import OllamaLocalTranslator, TRANSLATEGEMMA_CONTEXT_PROMPT_VERSION_V3

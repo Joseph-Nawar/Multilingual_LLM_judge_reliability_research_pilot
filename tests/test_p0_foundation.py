@@ -59,8 +59,8 @@ def test_baseline_template_and_reference_access_safeguards_are_documented() -> N
     evaluation = (ROOT / "docs" / "research" / "evaluation-plan.md").read_text()
     integrity = (ROOT / "docs" / "research" / "integrity-and-reproducibility.md").read_text()
     dataset = (ROOT / "docs" / "research" / "dataset-spec.md").read_text()
-    assert "candidate mandatory ordinary-condition baselines" in evaluation
-    assert "research owner must explicitly approve" in evaluation
+    assert "Approved ordinary-condition baselines" in evaluation
+    assert "The research owner approved these three ordinary-condition baselines" in evaluation
     assert "unqualified preplanned H3 claim" in evaluation
     assert "separate access path" in integrity
     assert "development-time judge/model selection" in integrity

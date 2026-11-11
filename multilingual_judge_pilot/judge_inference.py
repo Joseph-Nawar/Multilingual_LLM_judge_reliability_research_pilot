@@ -28,6 +28,8 @@ STRUCTURED_PARSER_VERSION_V2 = "p3-structured-validity-2"
 BINARY_RESPONSE_CONTRACT = "binary-verdict-v1"
 STRUCTURED_RESPONSE_CONTRACT = "structured-validity-v1"
 STRUCTURED_RESPONSE_CONTRACT_V2 = "structured-validity-v2"
+TRANSLATION_LITERAL_VALIDATION_POLICY_V3 = "literal-preservation-digits-v3"
+TRANSLATION_LITERAL_VALIDATION_POLICY_V4 = "literal-preservation-time-equivalence-v4"
 
 
 class BaselineKind(str, Enum):
@@ -713,13 +715,19 @@ class TranslationConfig:
     decoding_parameters: tuple[tuple[str, str | int | float | bool | None], ...] = ()
     retry_policy: RetryPolicy = RetryPolicy()
     failure_policy: TranslationFailurePolicy = TranslationFailurePolicy.RECORD_AND_SKIP_JUDGE
-    config_version: str = "translation-config-2"
+    config_version: str = "translation-config-3"
+    literal_validation_policy_version: str = TRANSLATION_LITERAL_VALIDATION_POLICY_V4
 
     def __post_init__(self) -> None:
         if self.pivot_language not in _LANGUAGES or not self.prompt_version.strip():
             raise ContractError("translation pivot language and prompt version are required")
         if not self.config_version.strip():
             raise ContractError("translation config version must be non-empty")
+        if self.literal_validation_policy_version not in {
+            TRANSLATION_LITERAL_VALIDATION_POLICY_V3,
+            TRANSLATION_LITERAL_VALIDATION_POLICY_V4,
+        }:
+            raise ContractError("unsupported translation literal-validation policy")
         if not isinstance(self.retry_policy, RetryPolicy):
             raise ContractError("translation retry_policy must be a RetryPolicy")
         try:
@@ -738,6 +746,7 @@ class TranslationConfig:
             "pivot_language": self.pivot_language,
             "prompt_version": self.prompt_version,
             "config_version": self.config_version,
+            "literal_validation_policy_version": self.literal_validation_policy_version,
             "decoding_parameters": dict(self.decoding_parameters),
             "retry_policy": self.retry_policy.to_record(),
             "failure_policy": self.failure_policy.value,

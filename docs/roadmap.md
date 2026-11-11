@@ -1,6 +1,6 @@
 # Milestone roadmap
 
-Progress stops after each milestone until an evidence-based review accepts the current work and authorizes the next. The research-owner decision record is the authority for approved P0 choices and remaining questions. No milestone is authorized by Codex implementation alone. A narrow exception authorizes P3 infrastructure preparation on independent synthetic fixtures in parallel with P2C human validation; it does not authorize the full P3 milestone or relax any freeze or inference gate.
+Progress follows the research-owner decisions recorded below. The 2026-11-11 decision accepted the P3 local feasibility work and authorized the full study with Gemma 4 12B and three baselines. This authorization is sufficient to proceed after the existing independent bilingual validation and pre-inference freeze; it does not waive those requirements or authorize paid/remote calls.
 
 ## P0 — Research foundation and audit amendments (approved 2026-10-29)
 
@@ -58,7 +58,7 @@ Progress stops after each milestone until an evidence-based review accepts the c
 
 **Human review package:** two hash-bound reviewer slots cover 56 scenarios and 448 variants. The four scenarios and 32 variants already covered in the concluded P2B feasibility pilot are excluded from new review tasks; their annotations remain unchanged. No new reviewer responses have been submitted, and no new bilingual validation is claimed.
 
-**Gate:** stop here. The dataset is not frozen. Independent bilingual review, quality-control and disagreement resolution, human review of duplicate/surface/template findings, research-owner acceptance of documented deviations and rendering proposals, and a separate explicit freeze authorization remain required before P3 or model inference. No judge inference or paid API call occurred during authoring.
+**Gate at P2C closeout:** at that milestone, the dataset was not frozen. Independent bilingual review, quality-control and disagreement resolution, human review of duplicate/surface/template findings, research-owner acceptance of documented deviations and rendering proposals, and a separate freeze authorization remained required before locked evaluation. No judge inference or paid API call occurred during authoring.
 
 ## P3 — Judge adapters, baseline approval, reproducibility, development-only checks
 
@@ -70,29 +70,35 @@ Progress stops after each milestone until an evidence-based review accepts the c
 
 **Implementation record:** see [P3 infrastructure-preparation decision record](research/decision-records/2026-11-03-p3-infrastructure-preparation.md), [experimental methodology proposal](research/proposals/2026-11-03-p3-experimental-methodology-proposal-v1.md), and [versioned configuration proposals](research/proposals/p3-experimental-config-proposals-v1.json). Acceptance of the infrastructure slice and preparation package does not advance the roadmap gate for full P3.
 
-### Methodology v2 preparation (authorized for proposal and synthetic contract updates only)
+### Commercial methodology v2 preparation (historical; superseded by the local-study decision of 2026-11-11)
 
 The research owner directed a v2 proposal around GPT-6.1 Sol, Claude Sonnet 5.5, and Gemini 3.8 Flash; direct, translation-first, and one-call structured judging; separate H2 diagnostics; a candidate English/MSA competence screen; and a recalculated three-model budget. The owner also authorized synthetic-only changes for the one-call structured output/parser and state-extraction request contracts. The existing caller-configured three-call interface remains a possible secondary experiment.
 
-The v2 package and implementation are **not** a frozen methodology or full P3 approval. Provider IDs/settings/terms, prompts, translation procedure, output and aggregation rules, competence thresholds, diagnostics, and budget remain subject to owner review. Only deterministic synthetic fixtures are used. No private study data are accessed, and no models or translators are called. Dataset freeze, spend, live inference, P4, and later work remain unauthorized.
+At that preparation milestone, the v2 package and implementation were **not** a frozen methodology or full P3 approval. Those commercial-provider options were superseded by the owner's zero-cost local Gemma 4 design and full-study authorization recorded below. The historical proposal and its synthetic-only limits remain in the linked records.
 
 See [methodology proposal v2](research/proposals/2026-11-03-p3-experimental-methodology-proposal-v2.md), [configuration proposal v2](research/proposals/p3-experimental-config-proposals-v2.json), and [v2 preparation record](research/decision-records/2026-11-03-p3-methodology-v2-preparation.md).
 
-### Full P3 milestone (not yet authorized)
+### Full P3 milestone (accepted for the local study design)
 
-**Deliverables:** minimal judge interface/adapters; direct and translation-first procedures; a one-call structured baseline as the proposed primary structured condition; optional three-call decomposition; translator and prompt manifests; reference-scoring separation; development-only English/MSA competence screen on separate material; development execution and analysis checks.
+**Accepted deliverables:** local Gemma 4 12B selected as the primary judge; Direct Prompt V2, Structured Prompt V2/schema V2, and TranslateGemma V3 baselines accepted; the separate English/MSA competence screen and four-language development feasibility pilot completed. Pilot findings are exploratory and retained without prompt, model, threshold, or label changes. Translation literal-validation policy V4 permits only same-local-time 12/24-hour notation equivalence and is hash-bound separately from prompt V3.
 
-**Acceptance evidence:** research owner explicitly approves the mandatory baseline set before locked evaluation. Any omitted candidate has a cost/feasibility rationale recorded before locked evaluation and unblinding. Same-backbone comparisons are used where feasible; evidence access is equivalent; prompts, translation procedures, criteria, decoding, parsers, aggregation, failure/retry rules, and analysis are frozen. Translator and judge tokens/costs are separately accounted. No method is described as a faithful published reproduction without verification. Competence-screen material and thresholds are frozen, separate from benchmark examples, and use no locked examples/labels or study gold/state/oracle data for selection. Tests confirm inference/scoring separation and preserve failures and raw outputs.
+**Status:** P3 methodology and local execution are accepted for the approved study. This does not imply that the study dataset is frozen or human-validated.
 
-**Gate:** research owner reviews baseline fairness and scope for H3, competence qualification, data isolation, cost estimates, and complete development artifacts. P4 additionally requires explicit budget authorization for paid inference.
+See the [full-study authorization and feasibility findings](research/decision-records/2026-11-11-p3-feasibility-go-full-study.md).
 
-## P4 — Authorized frozen pilot execution
+**Gate:** none remains for model or baseline selection. The existing dataset validation and pre-inference freeze requirements still apply. Paid and remote inference remain prohibited.
+
+## P4 — Owner-authorized full locked execution after validation and freeze
+
+**Authorization:** on 2026-11-11, the research owner authorized execution of the full locked study with local Gemma 4 12B once the existing two-reviewer bilingual validation is accepted and the pre-inference freeze is complete. No additional discretionary approval gate is required after those conditions are met. No paid or remote APIs are permitted.
 
 **Deliverables:** immutable run manifests and complete execution records for the frozen primary evaluation and separately identified auxiliary controls.
 
-**Acceptance evidence:** run contains the approved 288 locked primary items from 36 primary scenarios and 96 auxiliary control items from 12 locked control scenarios, with primary and control results reported separately. The 96 development primary items and separate competence screen are not relabeled as locked. Frozen prompts, data/template/match manifests, model/configuration hashes, budget authorization, and immutable run ID are recorded. Ordinary and oracle-diagnostic conditions are clearly separated. Every requested item has a success, parse, or failure record; raw responses, token/cost data by component, versions, and execution metadata are preserved. No label-driven selection, silent retry, or result-driven item change occurs.
+**Acceptance evidence:** run contains the approved 288 locked primary items from 36 primary scenarios and 96 auxiliary control items from 12 locked control scenarios, with primary and control results reported separately. The 96 development primary items and separate competence screen are not relabeled as locked. Frozen prompts, data/template/match manifests, model/configuration hashes, zero-cost local execution authorization, and immutable run ID are recorded. Ordinary and oracle-diagnostic conditions are clearly separated. Every requested item has a success, parse, or failure record; raw responses, token/cost data by component, versions, and execution metadata are preserved. No label-driven selection, silent retry, or result-driven item change occurs.
 
-**Gate:** independent review checks run completeness, missingness, deviations, prompt/data isolation, baseline coverage, and control separation before analysis.
+**Current blocker:** the commissioned reviewer submissions are not present in the private package, so independent validation is incomplete. The dataset remains unfrozen. Do not begin locked inference until that existing validation is complete and the pre-inference freeze record binds the final data and configuration hashes.
+
+**Post-run check:** review run completeness, missingness, deviations, prompt/data isolation, baseline coverage, and control separation before analysis.
 
 ## P5 — Statistical analysis, independent audit, go/no-go recommendation
 
