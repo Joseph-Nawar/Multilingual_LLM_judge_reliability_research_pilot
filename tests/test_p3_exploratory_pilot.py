@@ -198,3 +198,7 @@ def test_exploratory_score_reports_language_family_and_sensitivity_without_forma
     assert result["sensitivity"]["exclude_reviewer_unclear"]["total"] == 45
     assert result["sensitivity"]["exclude_human_disagreements_and_unclear"]["total"] == 39
     assert result["provisional_threshold_comparison"]["formal_qualification"] is False
+    assert result["provisional_threshold_comparison"]["pilot_decision"] == "provisional_pass_pattern"
+    outcomes[0]["final_status"] = "provider_failure"
+    incomplete = score_exploratory_pilot(items, outcomes, labels, families, review)
+    assert incomplete["provisional_threshold_comparison"]["pilot_decision"] == "provisional_incomplete"

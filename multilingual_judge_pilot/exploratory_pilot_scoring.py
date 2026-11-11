@@ -240,7 +240,13 @@ def score_exploratory_pilot(
             "thresholds": dict(QUALIFICATION_THRESHOLDS),
             "by_language": pass_by_language,
             "both_languages_meet_all_thresholds": all_thresholds_met,
-            "pilot_decision": "provisional_pass_pattern" if all_thresholds_met and not technical_missing else "provisional_fail_or_incomplete",
+            "pilot_decision": (
+                "provisional_incomplete"
+                if technical_missing
+                else "provisional_pass_pattern"
+                if all_thresholds_met
+                else "provisional_fail"
+            ),
         },
         "reviewer_agreement": {
             "determinate_items": len(determinate),

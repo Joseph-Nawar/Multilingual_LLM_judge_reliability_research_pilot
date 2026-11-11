@@ -245,6 +245,9 @@ def score_one_model(model_key: str) -> dict:
         **score,
         "model": run_manifest["model"],
         "configuration_hash": run_manifest["configuration_hash"],
+        "scorer_code_revision": subprocess.run(
+            ["git", "rev-parse", "HEAD"], cwd=REPO_ROOT, capture_output=True, text=True, check=True
+        ).stdout.strip(),
         "runner_code_revision": run_manifest["runner_code_revision"],
         "qualification_configuration_code_revision": run_manifest["qualification_configuration_code_revision"],
         "input_manifest_sha256": input_manifest["manifest_sha256"],
