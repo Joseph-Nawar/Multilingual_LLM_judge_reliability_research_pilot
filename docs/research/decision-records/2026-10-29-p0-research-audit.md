@@ -4,6 +4,10 @@
 **Reviewed P0 commit:** `58ff69361ec1db3af2c65d63dc915dfacc0c80bf`  
 **Review outcome:** P0 repository foundation approved; amendments R1–R4 required before P1 implementation. This record captures the requested amendment decisions and the uncertainties that remain. It does not claim that the amended commit has received a second research-owner review.
 
+## Subsequent disposition
+
+The status and open items below describe the P0 review point. Later owner decisions supersede them where recorded: P1 passed independent review at `3139cebe6926edeca0997c965617c7a35c3e0d27`; the 12-control locked auxiliary partition and matches only to locked primary scenarios were approved; schema 1.1 fixed the language/action chronology and bounded formal semantics; P2A was separately authorized for the authoring procedure and exactly four local development-only prototypes. P2B/P2C and later milestones are not authorized by that decision. See the [P1 decision record](2026-10-29-p1-implementation.md) and [P2A preflight record](2026-10-29-p2a-preflight.md) for current dispositions.
+
 ## R1 — No-change linguistic control
 
 **Recorded decision:** Preserve the primary set at 48 canonical scenarios, 96 histories, 384 items, with 12 development and 36 locked primary scenarios. Add a separately identified exploratory control of 12 canonical scenarios, 24 histories, and 96 additional items. Control turns restate or confirm an already active requirement without changing the effective state. Paired control histories start with different active requirements so the same action receives opposite labels without a revision within either history. Keep control results outside the primary estimand and report them separately. Do not claim that this small control fully identifies a causal revision effect.

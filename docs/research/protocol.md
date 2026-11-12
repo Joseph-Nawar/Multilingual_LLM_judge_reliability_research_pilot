@@ -1,14 +1,14 @@
 # Research protocol and hypotheses
 
-**Status:** P0 specification amended after the 2026-10-29 research-owner audit; not frozen for execution.
+**Status:** P0–P2C authoring milestones and the bounded P3 feasibility work are complete. On 2026-11-11, the research owner authorized the full study using Gemma 4 12B and the three approved baselines. The dataset remains unfrozen and locked inference has not begun because the commissioned bilingual review submissions are not present; the existing human-validation and pre-inference freeze requirements remain in force.
 
-**Study type:** controlled exploratory feasibility pilot.
+**Study type:** full multilingual judge-reliability study with an exploratory design and scenario-clustered analysis.
 
 **Primary object:** the LLM judge's binary action-validity classification.
 
 ## Research question
 
-Do LLM-based evaluators become less reliable when agent-action validity depends on user constraints introduced, revised, or revoked across languages?
+Do LLM judges correctly assess agent actions when effective user constraints evolve across English and Arabic conversations?
 
 The pilot compares English and Arabic conditions with paired scenario content and counterfactual histories. It tests evaluator behavior, not the ability of an agent to complete a task.
 
@@ -28,11 +28,13 @@ The primary set comprises 48 canonical scenarios across booking, customer operat
 
 The primary set has 48 canonical scenarios, 96 counterfactual histories, and 384 derived evaluation items (48 × 2 × 4). It retains 12 development and 36 locked evaluation scenarios: 96 development items and 288 locked primary items. All histories and language variants of a canonical scenario stay in one partition.
 
+Each primary pair must share semantically equivalent initial formal state, non-decisive formal events, the same decisive turn, and the same action decision point. Where same-condition language variants are present for both histories, non-decisive conversational turn structure and text spans must match exactly after ignoring segment IDs. This structural equality does not establish linguistic equivalence. The oracle checks that the pair has the same validity label before the decisive transition and opposite labels after it, and that the final difference is confined to active action-relevant state. This pair-level causal integrity rule is evaluated from typed state and events; audit digests that include superseded requirements or bookkeeping changes do not establish a meaningful transition. The no-change auxiliary controls are a separate design: they intentionally begin with different effective requirements and keep opposite labels through no-op restatements.
+
 ### Separate no-change linguistic control
 
 An exploratory control adds 12 canonical no-change scenarios, 24 histories, and 96 evaluation items (12 × 2 × 4). In each history, a later user turn restates or confirms an already active requirement without changing its effective meaning. The two histories in a control pair begin with different active values or permissions, and each later restatement repeats its own initial requirement; the unchanged action is therefore valid in one history and invalid in the other without any within-history constraint revision. For example, two histories can begin with different budget ceilings, repeat those same ceilings later, and retain one identical action that is valid under only one ceiling.
 
-Where feasible, each control scenario is matched to a primary scenario on domain, constraint type, the pair of final effective states, action complexity, and turn structure. The relationship is recorded without merging the distinct canonical IDs. Control results remain auxiliary and are never included in the primary estimand. The current partition proposal keeps all 12 controls in a locked auxiliary set, matched only to locked primary scenarios; this proposal requires explicit P1 approval before construction. Under that proposal, the full plan has 60 canonical scenarios and 480 items: 12 development primary scenarios (96 items), 36 locked primary scenarios (288 items), and 12 locked controls (96 items). Each control language condition has 24 items, 12 valid and 12 invalid.
+Where feasible, each control scenario is matched to a primary scenario on domain, constraint type, the pair of final effective states, action complexity, and turn structure. The relationship is recorded without merging the distinct canonical IDs. Control results remain auxiliary and are never included in the primary estimand. The research owner approved all 12 controls in a locked auxiliary set in the P1 authorization and later approved restricting control matches to locked primary scenarios. The full plan has 60 canonical scenarios and 480 items: 12 development primary scenarios (96 items), 36 locked primary scenarios (288 items), and 12 locked controls (96 items). Each control language condition has 24 items, 12 valid and 12 invalid.
 
 ### Language conditions and controlled representations
 
@@ -48,7 +50,7 @@ Report all four conditions separately, alongside any clearly labeled exploratory
 
 ## Ground truth and label isolation
 
-The canonical task state and deterministic, executable validity rule are authoritative. The rule must resolve which constraints are active at the action time, including supersession, revocation, numerical bounds, and temporal conditions. For no-change controls, it must verify that the restatement leaves the effective state unchanged. LLM output is never a label source.
+The canonical task state and deterministic, executable validity rule are authoritative. The P1 oracle applies only typed formal events and constraints; it never interprets conversation text. The rule resolves which constraints are active at action time, including supersession, revocation, numerical bounds, and temporal conditions. For no-change controls, it verifies that a formal restatement leaves the effective state unchanged. Structural coverage is a span-link check only; natural-language semantic equivalence remains for independent bilingual validation before freeze. LLM output is never a label source.
 
 Ordinary judge inference and reference scoring use separated data-access paths. The ordinary judge receives the conversation and action needed for evaluation, but not gold labels, canonical effective states, oracle verdicts, or pairing keys. These materials are also excluded from development-time judge/model selection. The reference scorer consumes the response and opaque item ID through a separate path and cannot supply hidden references back to the judge. Any intervention that exposes canonical effective state is a separately named oracle diagnostic; it is not a fair deployable baseline and is excluded from ordinary-condition summaries.
 
@@ -67,8 +69,8 @@ Ordinary judge inference and reference scoring use separated data-access paths. 
 
 ## Scope limits
 
-This pilot is a feasibility study over a small, controlled set of synthetic or authored scenarios, not a representative estimate of real-world judge reliability. The small no-change control cannot fully identify the causal effect of consequential revision. Shared authoring templates may induce dependence beyond canonical-scenario clustering. Exact baseline selection, translation/localization procedure, template-allocation feasibility, code-like literal policy, and H2 diagnostic protocol must be resolved at their roadmap gates. Negative or inconclusive results must be reported with the same care as positive results.
+The full study remains a small authored-scenario study, not a representative estimate of real-world judge reliability. The small no-change control cannot fully identify the causal effect of consequential revision. Shared authoring templates may induce dependence beyond canonical-scenario clustering. The research owner has selected Gemma 4 12B and approved the direct, translation-first, and single-call structured baselines; the translation checker uses a versioned conservative 12/24-hour equivalence rule. Negative or inconclusive results must be reported with the same care as positive results.
 
 ## Decisions for the P0 review gate
 
-The 2026-10-29 review decisions and remaining uncertainties are recorded in [the P0 audit decision record](decision-records/2026-10-29-p0-research-audit.md). That record distinguishes approved scope from proposals that must be approved before P1, P3, or the locked evaluation. P0 approval does not authorize P1 or model inference.
+The 2026-10-29 P0 decisions and P1 implementation review are recorded in their decision records. P2A feasibility and the P2B pilot closeout are recorded separately. The four-scenario P2B pilot's semantic/linguistic assessments and unresolved dependence disagreements are distinct findings; it does not establish full-benchmark validity and remains closed. The later P2C authorization permitted full dataset authoring and deterministic validation. The resulting 60 canonical scenarios, 120 histories, and 480 language items remain private. New P2C language variants still require the already-commissioned independent bilingual validation. The 2026-11-11 full-study GO authorizes execution after that validation and a hash-bound pre-inference freeze; it does not waive either condition.

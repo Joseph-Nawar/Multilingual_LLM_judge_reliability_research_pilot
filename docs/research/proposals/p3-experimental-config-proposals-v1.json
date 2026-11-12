@@ -1,0 +1,214 @@
+{
+  "proposal_schema_version": "p3-experimental-config-proposals-1",
+  "proposal_version": "1.0.0",
+  "status": "DRAFT_PROPOSAL_UNAPPROVED",
+  "approval": null,
+  "created_date": "2026-11-03",
+  "scope": {
+    "locked_primary_items": 288,
+    "locked_auxiliary_control_items": 96,
+    "locked_items_total": 384,
+    "language_conditions": ["EN-EN", "AR-AR", "EN-AR", "AR-EN"],
+    "inference_authorized": false,
+    "dataset_freeze_authorized": false,
+    "study_examples_accessed": false
+  },
+  "run_configuration_proposal": {
+    "version": "draft-p3-run-config-v1",
+    "baseline_type": "one of direct_multilingual, translation_first, structured_decomposed",
+    "prompt_bundle_version": "draft baseline-specific version IDs below",
+    "parser_version": "p3-binary-json-verdict-1",
+    "run_order": {
+      "random_seed": "predeclared 256-bit seed",
+      "algorithm_version": "draft-sha256-seed-null-item-id-order-v1",
+      "same_order_across_baselines": true,
+      "one_isolated_request_context_per_item": true
+    },
+    "configuration_hash": "computed from the complete approved configuration before execution",
+    "execution_id": "new unique identifier for each actual execution",
+    "attempt_id": "new identifier for each individual translator or judge call"
+  },
+  "candidate_judges": [
+    {
+      "provider_id": "openai",
+      "model_id": "gpt-6.1-sol",
+      "version_pin_status": "EXACT_MODEL_ID; DATED_SNAPSHOT_OPTION_NOT_CONFIRMED",
+      "selection_status": "UNAPPROVED_CANDIDATE"
+    },
+    {
+      "provider_id": "anthropic",
+      "model_id": "claude-sonnet-5-5",
+      "version_pin_status": "PROVIDER_DOCUMENTS_DATELESS_ID_AS_FIXED_MODEL_SNAPSHOT",
+      "selection_status": "UNAPPROVED_CANDIDATE"
+    },
+    {
+      "provider_id": "google",
+      "model_id": "gemini-3.8-flash",
+      "version_pin_status": "STABLE_ID; NOT_A_DATED_SNAPSHOT",
+      "selection_status": "OPTIONAL_UNAPPROVED_CANDIDATE"
+    }
+  ],
+  "shared_judge_request": {
+    "visible_fields": [
+      "opaque_item_id",
+      "conversation_turns_before_action_point",
+      "structured_action",
+      "public_tool_schema",
+      "fixed_english_instruction"
+    ],
+    "prohibited_fields": [
+      "canonical_state",
+      "effective_state",
+      "oracle_verdict",
+      "reference_label",
+      "pairing_key",
+      "author_classification",
+      "private_provenance"
+    ],
+    "response_contract": {
+      "type": "strict_binary_json",
+      "allowed_objects": [
+        {"verdict": "valid"},
+        {"verdict": "invalid"}
+      ],
+      "extra_keys_allowed": false,
+      "parser_version": "p3-binary-json-verdict-1",
+      "invalid_missing_refused_and_provider_failure_are_distinct": true
+    }
+  },
+  "proposed_decoding_and_failure_policy": {
+    "status": "UNAPPROVED",
+    "reasoning_effort": "lowest pre-approved setting established by a separate development-only check; provider-specific mapping required",
+    "temperature": "0 only when supported; omit and record unsupported settings",
+    "max_output_tokens": 1024,
+    "seed": "fixed where supported; record unsupported settings",
+    "max_attempts": 2,
+    "retryable_error_categories": ["transient_transport", "rate_limit"],
+    "retry_invalid_or_malformed_output": false,
+    "retry_refusal": false,
+    "technical_failure_policy": "retain all attempts and report missing; no unapproved fallback"
+  },
+  "baseline_proposals": [
+    {
+      "baseline_id": "direct_multilingual",
+      "status": "UNAPPROVED",
+      "prompt_version": "draft-direct-v1",
+      "input_evidence": "shared_judge_request",
+      "judge_calls_per_item": 1,
+      "output": "one strict binary verdict",
+      "aggregation": "identity",
+      "failure_policy": "preserve missing/refused/invalid/provider-failure status; never coerce"
+    },
+    {
+      "baseline_id": "translation_first",
+      "status": "UNAPPROVED",
+      "prompt_version": "draft-translation-judge-v1",
+      "translator": {
+        "provider_id": "google",
+        "model_id": "gemini-3.8-flash",
+        "status": "UNAPPROVED_PROPOSAL",
+        "prompt_version": "draft-literal-preserving-translation-v1",
+        "target_language": "en",
+        "translate_items_with_arabic": true,
+        "pass_through_all_english_items": true,
+        "translator_sees": ["complete_turn_indexed_conversation"],
+        "translator_does_not_see": ["action", "tool_schema", "canonical_state", "oracle_verdict", "reference_label"],
+        "preserve": [
+          "turn_count",
+          "speaker_roles",
+          "turn_indices_and_chronology",
+          "numbers_and_units",
+          "dates_and_times_and_time_zones",
+          "currencies",
+          "identifiers_and_code_literals",
+          "permission_modality_and_scope",
+          "negation_quantifiers_comparisons_and_constraint_direction"
+        ],
+        "prohibited_transformations": ["add", "infer", "summarize", "merge", "split", "reorder", "omit"]
+      },
+      "retry_policy": {
+        "status": "UNAPPROVED",
+        "max_attempts": 2,
+        "retryable_error_categories": ["transient_transport", "rate_limit"],
+        "invalid_translation_output_retry": false
+      },
+      "judge_calls_per_item": 1,
+      "translation_calls_per_locked_item": "one for Arabic-bearing items; zero for EN-EN",
+      "translation_failure_policy": "retain every attempt and do not call judge on source or partial output",
+      "output": "one strict binary verdict",
+      "aggregation": "identity"
+    },
+    {
+      "baseline_id": "structured_decomposed",
+      "status": "UNAPPROVED",
+      "prompt_bundle_version": "draft-decomposition-v1",
+      "stages": [
+        {
+          "stage_id": "public_action_contract",
+          "prompt_version": "draft-decomp-contract-v1",
+          "criterion": "action satisfies required fields, value types, and constraints in the public tool schema",
+          "input_evidence": "shared_judge_request",
+          "output": "strict binary verdict"
+        },
+        {
+          "stage_id": "numerical_temporal_requirements",
+          "prompt_version": "draft-decomp-numeric-temporal-v1",
+          "criterion": "action satisfies applicable numerical, unit, date, time, and boundary constraints after revisions",
+          "input_evidence": "shared_judge_request",
+          "output": "strict binary verdict"
+        },
+        {
+          "stage_id": "permission_and_other_requirements",
+          "prompt_version": "draft-decomp-permission-scope-v1",
+          "criterion": "action satisfies applicable authorization, revocation, scope, and other explicit task constraints after revisions",
+          "input_evidence": "shared_judge_request",
+          "output": "strict binary verdict"
+        }
+      ],
+      "judge_calls_per_item": 3,
+      "aggregation": {
+        "version": "draft-all-three-pass-1",
+        "valid_if": "all three parsed verdicts are valid",
+        "invalid_if": "all three parsed and at least one verdict is invalid",
+        "otherwise": "unscored; preserve stage failures and do not coerce"
+      }
+    }
+  ],
+  "competence_screen_proposal": {
+    "status": "UNAPPROVED",
+    "materials": "independently authored and bilingual-human-validated English and MSA development items; disjoint from study material",
+    "items_per_language_per_model": 24,
+    "class_balance_per_language": {"valid": 12, "invalid": 12},
+    "judge_calls_per_model": 48,
+    "qualification_rule": {
+      "minimum_exact_correct_per_language": 20,
+      "minimum_valid_correct_per_language": 10,
+      "minimum_invalid_correct_per_language": 10
+    },
+    "use": "pass/fail eligibility only; not a ranking or benchmark result",
+    "code_switched_competence_claimed": false
+  },
+  "cost_proposal": {
+    "currency": "USD",
+    "pricing_basis": "standard per-token rates checked 2026-11-03; no caching or batch discount",
+    "locked_judge_calls_per_backbone": {
+      "direct": 384,
+      "translation_first_judge": 384,
+      "structured_decomposed": 1152,
+      "total": 1920
+    },
+    "competence_screen_calls_per_backbone": 48,
+    "shared_translation_calls": {
+      "arabic_bearing_locked_items": 288,
+      "independent_translation_screen_items": 24,
+      "total": 312
+    },
+    "retry_stress_factors": {"low": 0.0, "expected": 0.02, "high": 0.10},
+    "estimated_total_cost": {
+      "recommended_two_model_core_gpt_claude": {"low": 10.43, "expected": 21.61, "high": 43.95},
+      "core_plus_optional_gemini_judge": {"low": 12.33, "expected": 25.56, "high": 51.95},
+      "optional_three_model_high_after_gemini_2026_price_period": 61.23
+    },
+    "authorization": "planning only; no budget or API call authorized"
+  }
+}

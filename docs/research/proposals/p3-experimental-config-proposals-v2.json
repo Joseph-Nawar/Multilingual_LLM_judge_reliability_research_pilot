@@ -1,0 +1,166 @@
+{
+  "proposal_schema_version": "p3-experimental-config-proposals-2",
+  "proposal_version": "2.0.0",
+  "status": "DRAFT_PROPOSAL_UNAPPROVED",
+  "approval": null,
+  "checked_date": "2026-11-03",
+  "scope": {
+    "locked_primary_items": 288,
+    "locked_auxiliary_control_items": 96,
+    "locked_items_total": 384,
+    "language_conditions": ["EN-EN", "AR-AR", "EN-AR", "AR-EN"],
+    "inference_authorized": false,
+    "dataset_freeze_authorized": false,
+    "study_examples_accessed": false
+  },
+  "candidate_judges": [
+    {
+      "provider_id": "openai",
+      "model_id": "gpt-6.1-sol",
+      "version_status": "No dated snapshot documented on reviewed page; retain exact ID and returned model metadata.",
+      "proposed_api": "Responses API",
+      "structured_output": "JSON Schema response format",
+      "context_tokens": 1050000,
+      "max_output_tokens": 128000,
+      "proposed_decoding": {"reasoning": {"effort": "low"}, "max_output_tokens": 2048, "store": false},
+      "sampling_parameters": "Omitted; no shared temperature, top_p, top_k, or seed assumption.",
+      "standard_price_per_million_usd": {"input": 2.0, "output_including_reasoning": 10.0},
+      "data_use": "Paid API inputs are not used for model training absent opt-in; default abuse-monitoring retention up to 30 days. Responses API storage disabled with store=false; verify organization controls and endpoint settings before any study transmission.",
+      "selection_status": "PROVISIONAL_CANDIDATE"
+    },
+    {
+      "provider_id": "anthropic",
+      "model_id": "claude-sonnet-5-5",
+      "version_status": "Anthropic documents the dateless generation-4.6+ ID as a fixed model snapshot; capture exact returned model metadata.",
+      "proposed_api": "First-party Messages API",
+      "structured_output": "JSON Schema through output_config.format",
+      "context_tokens": 1000000,
+      "max_output_tokens": 128000,
+      "proposed_decoding": {"max_tokens": 2048, "output_config": {"effort": "low"}},
+      "sampling_parameters": "Do not send temperature, top_p, or top_k; Claude Sonnet 5.5 rejects them.",
+      "standard_price_per_million_usd": {"input": 2.0, "output_including_reasoning": 10.0},
+      "data_use": "Retained data is not used for model training without express permission. Current API policy says prompts and outputs are not retained by default except for specifically designated Covered Models; verify current model and feature eligibility before transmission. ZDR requires organization-level enablement; structured-output schemas may be cached up to 24 hours.",
+      "selection_status": "PROVISIONAL_CANDIDATE"
+    },
+    {
+      "provider_id": "google",
+      "model_id": "gemini-3.8-flash",
+      "version_status": "Stable model ID, but not a dated immutable snapshot; record returned model metadata and recheck lifecycle before freeze.",
+      "proposed_api": "Gemini API paid service",
+      "structured_output": "Provider-supported structured JSON using the supported JSON Schema subset",
+      "context_tokens": 1048576,
+      "max_output_tokens": 65536,
+      "proposed_decoding": {"generation_config": {"max_output_tokens": 2048, "thinking_level": "low"}},
+      "sampling_parameters": "Omit temperature, top_p, top_k, and candidate_count as directed by the 3.8 migration guide.",
+      "standard_price_per_million_usd": {"input_through_2026_12_31": 0.75, "output_through_2026_12_31": 3.75, "input_from_2027_01_01": 1.5, "output_from_2027_01_01": 7.5},
+      "data_use": "Only use a Gemini API Cloud Project with active billing (Paid Service). Paid prompts/responses are not used to improve products, but limited abuse-monitoring logs may be retained and stored in any country. Never use Free or Contributor tiers for unpublished study content without separate explicit owner approval.",
+      "selection_status": "PROVISIONAL_CANDIDATE"
+    }
+  ],
+  "ordinary_baselines": [
+    {
+      "baseline_id": "direct_multilingual",
+      "status": "PROPOSED_MANDATORY",
+      "requests_per_item": 1,
+      "locked_items": 384,
+      "judge_calls_per_backbone": 384,
+      "visible_evidence": ["opaque item ID", "original pre-action conversation", "structured action", "public tool contract"],
+      "output_contract": "binary-verdict-v1",
+      "aggregation": "strict single-call parse; no coercion"
+    },
+    {
+      "baseline_id": "translation_first",
+      "status": "PROPOSED_MANDATORY",
+      "requests_per_item": 1,
+      "locked_items": 384,
+      "judge_calls_per_backbone": 384,
+      "visible_evidence": ["opaque item ID", "English translation of Arabic-bearing conversation turns or unchanged English turns", "same structured action", "same public tool contract"],
+      "translation_requests": 288,
+      "translation_output_reuse": "Generate once per locked Arabic-bearing input and reuse the exact hash-bound output across all three judge backbones where feasible.",
+      "output_contract": "binary-verdict-v1",
+      "aggregation": "strict single-call parse; no coercion"
+    },
+    {
+      "baseline_id": "structured_single_call",
+      "status": "PROPOSED_MANDATORY_PRIMARY_STRUCTURED_BASELINE",
+      "requests_per_item": 1,
+      "locked_items": 384,
+      "judge_calls_per_backbone": 384,
+      "visible_evidence": ["opaque item ID", "same complete original pre-action conversation as direct baseline", "same structured action", "same public tool contract"],
+      "output_contract": "structured-validity-v1",
+      "output_fields": ["tool_contract", "constraint_assessments", "verdict"],
+      "aggregation": "invalid if tool contract or any relevant constraint is violated; otherwise valid; contradictory or malformed combinations are invalid_output"
+    },
+    {
+      "baseline_id": "structured_decomposed",
+      "status": "OPTIONAL_SECONDARY_NOT_PRIMARY",
+      "requests_per_item": 3,
+      "locked_items": 384,
+      "additional_judge_calls_per_backbone": 1152,
+      "criteria": ["public action/tool contract", "numerical and temporal constraints", "permissions and other explicit constraints"],
+      "aggregation": "valid only if all three parse valid; invalid if all parse and one or more are invalid; otherwise unscored"
+    }
+  ],
+  "run_configuration_proposal": {
+    "version": "draft-p3-run-config-v2",
+    "prompt_bundle_version": "versioned per baseline; exact wording unapproved",
+    "parser_versions": {"binary": "p3-binary-json-verdict-1", "structured": "p3-structured-validity-1"},
+    "request_contract_versions": {"binary": "binary-verdict-v1", "structured": "structured-validity-v1"},
+    "retry_policy": {"max_attempts": 2, "retry_only_allowlisted_transient_technical_errors": true, "retry_malformed_or_refused_outputs": false},
+    "run_order": {"seed": "predeclared 256-bit seed", "same_item_order_across_baselines_within_backbone": true, "isolated_request_context_per_item": true},
+    "records": ["configuration hash", "immutable run ID", "fresh execution ID", "attempt ID", "exact request and raw response", "provider-returned model ID", "usage", "latency", "cost", "timestamps", "failure/refusal/parser status"],
+    "secrets": "Never store credentials in manifests, source, or logs.",
+    "approval": "PROPOSAL_ONLY"
+  },
+  "state_reconstruction_diagnostic_proposal": {
+    "status": "OPTIONAL_H2_DIAGNOSTIC_NOT_RUN",
+    "state_extraction": {"calls_per_item_per_backbone": 1, "input": "ordinary conversation, action, and public tool contract only", "output": "model-generated active-constraint fields with source turn indices", "scoring": "separate blinded scorer compares observable extraction fields with canonical reference fields after inference"},
+    "oracle_state_intervention": {"calls_per_item_per_backbone": 1, "input": "ordinary evidence plus effective state only", "withheld": ["gold validity label", "oracle verdict"], "analysis": "paired correctness change against ordinary direct judgment, reported separately"},
+    "interpretation": "Observable extracted-state agreement is not proof of internal model reasoning.",
+    "approval": "PROPOSAL_ONLY"
+  },
+  "competence_screen_proposal": {
+    "status": "UNAPPROVED_CANDIDATE",
+    "materials": "independently authored English and MSA items disjoint from all study wording, scenarios, states, labels, and reference data",
+    "items_per_language_per_model": 24,
+    "class_balance_per_language": {"valid": 12, "invalid": 12},
+    "judge_calls_per_model": 48,
+    "judge_calls_across_three_models": 144,
+    "qualification_rule": {"minimum_correct_per_language": 20, "minimum_valid_correct_per_language": 10, "minimum_invalid_correct_per_language": 10},
+    "threshold_consequences": {"overall_percent": 83.3333, "max_total_errors": 4, "max_errors_in_each_class": 2, "one_error_overall_percentage_points": 4.1667, "one_error_per_class_percentage_points": 8.3333},
+    "use": "Provisional pass/fail competence screen only; not a benchmark outcome or model ranking. Do not run or select models from outcomes without approval.",
+    "code_switched_competence_claimed": false
+  },
+  "budget_proposal": {
+    "currency": "USD",
+    "prices": {"openai": {"input_per_million": 2.0, "output_per_million": 10.0}, "anthropic": {"input_per_million": 2.0, "output_per_million": 10.0}, "google_intro_through_2026_12_31": {"input_per_million": 0.75, "output_per_million": 3.75}, "google_from_2027_01_01": {"input_per_million": 1.5, "output_per_million": 7.5}},
+    "call_counts_before_retries": {"locked_items": 384, "per_backbone": {"direct": 384, "translation_first_judge": 384, "structured_single_call": 384, "ordinary_judging_total": 1152, "competence_screen": 48, "all_judge_calls": 1200}, "all_three_backbones": {"ordinary_judging_total": 3456, "competence_screen": 144, "all_judge_calls": 3600}, "shared_translations": {"locked_arabic_bearing_inputs": 288, "independent_translation_quality_inputs_optional": 24, "total_assumed": 312}, "optional_all_backbones": {"state_extraction": 1152, "oracle_state_intervention": 1152, "three_call_decomposition_additional": 3456}},
+    "token_assumptions": {
+      "note": "Planning averages, not measured study token lengths. Visible tokens are common request-class approximations; provider-specific reasoning-token output estimates are added to billed output. No study examples or provider tokenizers were inspected.",
+      "low": {"retry_fraction": 0.0, "direct_translation_judge_input_output": [900, 75], "structured_judge_input_output": [1200, 220], "competence_input_output": [700, 80], "translation_input_output": [700, 140], "state_extraction_input_output": [1200, 250], "oracle_intervention_input_output": [1250, 75], "three_call_criterion_input_output": [1100, 120], "reasoning_output_tokens": {"openai": {"direct_translation": 100, "structured": 200, "screen": 50, "state_extraction": 200, "oracle_intervention": 100, "decomposition": 100}, "anthropic": {"direct_translation": 150, "structured": 250, "screen": 60, "state_extraction": 250, "oracle_intervention": 150, "decomposition": 120}, "google": {"direct_translation": 100, "structured": 180, "screen": 50, "state_extraction": 180, "oracle_intervention": 100, "decomposition": 100}, "translator_google": 50}},
+      "expected": {"retry_fraction": 0.02, "direct_translation_judge_input_output": [1500, 100], "structured_judge_input_output": [1900, 360], "competence_input_output": [1000, 100], "translation_input_output": [1300, 280], "state_extraction_input_output": [1900, 500], "oracle_intervention_input_output": [2000, 100], "three_call_criterion_input_output": [1800, 210], "reasoning_output_tokens": {"openai": {"direct_translation": 200, "structured": 400, "screen": 100, "state_extraction": 450, "oracle_intervention": 200, "decomposition": 220}, "anthropic": {"direct_translation": 300, "structured": 550, "screen": 130, "state_extraction": 550, "oracle_intervention": 300, "decomposition": 280}, "google": {"direct_translation": 240, "structured": 450, "screen": 120, "state_extraction": 450, "oracle_intervention": 240, "decomposition": 220}, "translator_google": 120}},
+      "high": {"retry_fraction": 0.1, "direct_translation_judge_input_output": [2600, 150], "structured_judge_input_output": [3300, 600], "competence_input_output": [1600, 160], "translation_input_output": [2600, 600], "state_extraction_input_output": [3300, 900], "oracle_intervention_input_output": [3500, 150], "three_call_criterion_input_output": [3100, 350], "reasoning_output_tokens": {"openai": {"direct_translation": 500, "structured": 900, "screen": 250, "state_extraction": 1000, "oracle_intervention": 500, "decomposition": 500}, "anthropic": {"direct_translation": 750, "structured": 1300, "screen": 300, "state_extraction": 1300, "oracle_intervention": 750, "decomposition": 650}, "google": {"direct_translation": 600, "structured": 1100, "screen": 300, "state_extraction": 1100, "oracle_intervention": 600, "decomposition": 600}, "translator_google": 300}}
+    },
+    "retry_stress": "0%, 2%, and 10% of applicable calls receive one extra technical attempt; expected/high products are expected counts and can be fractional. No retries assumed for malformed/refused outputs. No caching or batch discounts.",
+    "translation_quality": "Historical planning counted 24 optional independent translation-QC items in addition to 288 locked Arabic-bearing items; this is an item count, not a provider-call count. The associated translation cost totals are superseded.",
+    "translation_accounting_correction": {
+      "status": "Correction to prior planning language; does not recalculate historical commercial cost arithmetic.",
+      "arabic_bearing_evaluation_items": 288,
+      "provider_call_formula": "Sum Arabic conversation turns across translation-eligible items, plus every retry attempt actually made.",
+      "illustrative_two_turn_design_only": {"AR-AR_items": 96, "EN-AR_items": 96, "AR-EN_items": 96, "base_arabic_turn_provider_calls": 384},
+      "artifact_reuse": "A successful hash-bound conversation translation may be reused across judge backbones.",
+      "locked_inventory": "No locked conversation was inspected to estimate Arabic-turn counts; compute exact calls only from a validated manifest at an authorized stage.",
+      "historical_field_interpretation": "shared_translations.locked_arabic_bearing_inputs is an item count, not a provider-call count; previous total and cost estimates are superseded for future planning."
+    },
+    "estimates_usd": {
+      "current_intro_prices": {
+        "low": {"openai_ordinary_including_screen": 5.3904, "anthropic_ordinary_including_screen": 5.9712, "google_ordinary_including_screen": 1.9926, "shared_translation": 0.3861, "ordinary_total": 13.7403, "optional_h2_all_models": 10.524, "optional_three_call_all_models": 12.2688, "all_optional_total": 36.5331},
+        "expected": {"openai_ordinary_including_screen": 9.3612, "anthropic_ordinary_including_screen": 10.7467, "google_ordinary_including_screen": 3.705, "shared_translation": 0.7876, "ordinary_total": 24.6006, "optional_h2_all_models": 19.726, "optional_three_call_all_models": 22.7517, "all_optional_total": 67.0783},
+        "high": {"openai_ordinary_including_screen": 19.3934, "anthropic_ordinary_including_screen": 23.2214, "google_ordinary_including_screen": 7.916, "shared_translation": 1.8275, "ordinary_total": 52.3585, "optional_h2_all_models": 41.8651, "optional_three_call_all_models": 46.6171, "all_optional_total": 140.8407}
+      },
+      "gemini_price_from_2027_01_01": {"ordinary_total": {"low": 16.119, "expected": 29.0933, "high": 62.102}, "all_optional_total": {"low": 42.3894, "expected": 78.0924, "high": 164.5552}}
+    },
+    "excluded_costs": ["tax", "regional-processing premiums", "price or model changes after checked date", "unexpected provider surcharges", "storage or privacy add-ons", "translation QC human labor"],
+    "authorization": "Planning only. No expenditure, API call, or study-data transmission is authorized. Reprice and recompute before any budget request."
+  }
+}

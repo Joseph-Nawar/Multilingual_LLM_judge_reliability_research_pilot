@@ -59,10 +59,41 @@ def test_baseline_template_and_reference_access_safeguards_are_documented() -> N
     evaluation = (ROOT / "docs" / "research" / "evaluation-plan.md").read_text()
     integrity = (ROOT / "docs" / "research" / "integrity-and-reproducibility.md").read_text()
     dataset = (ROOT / "docs" / "research" / "dataset-spec.md").read_text()
-    assert "candidate mandatory ordinary-condition baselines" in evaluation
-    assert "research owner must explicitly approve" in evaluation
+    assert "Approved ordinary-condition baselines" in evaluation
+    assert "The research owner approved these three ordinary-condition baselines" in evaluation
     assert "unqualified preplanned H3 claim" in evaluation
     assert "separate access path" in integrity
     assert "development-time judge/model selection" in integrity
     assert "genuinely distinct authoring templates" in dataset
     assert "template-aware sensitivity analysis" in dataset
+
+
+def test_p2b1_design_controls_cover_complexity_positions_and_constraint_polarity() -> None:
+    blueprint = (ROOT / "docs" / "research" / "scenario-blueprint.md").read_text()
+    authoring = (ROOT / "docs" / "research" / "authoring-protocol.md").read_text()
+    evaluation = (ROOT / "docs" / "research" / "evaluation-plan.md").read_text()
+    annotation = (ROOT / "docs" / "research" / "bilingual-annotation-protocol.md").read_text()
+    assert "decisive-update dependence" in blueprint
+    assert "two directly interpretable (`yes`) and two history-dependent (`no`) updates per cell" in blueprint
+    assert "six upper-bound and six lower-bound" in blueprint
+    assert "six earliest-bound and six latest-bound" in blueprint
+    assert "24 directly interpretable / 24 history-dependent" in authoring
+    assert "whole-action dependence" in authoring
+    assert "UUIDv4" in evaluation
+    assert "SHA-256" in evaluation
+    assert "Can the effective requirement introduced, revised, revoked, or preserved" in annotation
+    assert "Can the validity of the entire agent action be determined" in annotation
+    assert "p2b1-annotation-2" in annotation
+    assert "p2b1-adjudication-2" in annotation
+    assert "canonical_scenario_sha256" in annotation
+
+
+def test_p2b1_revision_and_review_data_remain_private() -> None:
+    from multilingual_judge_pilot.preflight import verify_research_data_exclusion
+
+    audit = verify_research_data_exclusion(ROOT)
+
+    assert audit.all_private_paths_ignored is True
+    assert any("p2b-1/review-packets" in path for path in audit.ignored_paths)
+    assert any("p2b-1/annotations" in path for path in audit.ignored_paths)
+    assert audit.tracked_private_paths == ()
