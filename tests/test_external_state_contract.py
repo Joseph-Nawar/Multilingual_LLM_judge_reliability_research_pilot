@@ -69,7 +69,12 @@ def test_schema_patterns_match_numeric_and_timezone_normalizer_requirements():
     temporal_boundary = STATE_EXTRACTION_SCHEMA_V2["properties"]["temporal_constraints"]["items"]["properties"]["upper_bound"]["properties"]["value"]
     numerical_row = STATE_EXTRACTION_SCHEMA_V2["properties"]["numerical_constraints"]["items"]
     assert numeric_boundary["pattern"] == r"^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?$"
-    assert temporal_boundary["pattern"] == r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$"
+    assert temporal_boundary["pattern"] == (
+        r"^(?:000[1-9]|00[1-9]\d|0[1-9]\d{2}|[1-9]\d{3})-"
+        r"(?:0[1-9]|1[0-2])-(?:0[1-9]|[12]\d|3[01])T"
+        r"(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d(?:\.\d{1,6})?"
+        r"(?:Z|[+-](?:[01]\d|2[0-3]):[0-5]\d)$"
+    )
     assert numerical_row["properties"]["field"]["pattern"] == r".*\S.*"
     assert numerical_row["properties"]["currency_code"]["pattern"] == r"^[A-Za-z]{3}$"
 
@@ -127,3 +132,30 @@ def test_empty_bounds_and_timezone_naive_times_are_rejected():
     }
     with pytest.raises(ValueError, match="invalid_temporal_boundary"):
         normalize_constraint_state_v2(naive)
+
+
+def test_temporal_schema_only_admits_precision_and_offsets_supported_by_normalizer():
+    import re
+
+    value_schema = STATE_EXTRACTION_SCHEMA_V2["properties"]["temporal_constraints"]["items"]["properties"]["lower_bound"]["properties"]["value"]
+    pattern = re.compile(value_schema["pattern"])
+    valid = "2026-11-12T14:00:00.123456+02:00"
+    excessive_precision = "2026-11-12T14:00:00.1234567+02:00"
+    excessive_offset = "2026-11-12T14:00:00+24:00"
+    assert pattern.fullmatch(valid)
+    assert not pattern.fullmatch(excessive_precision)
+    assert not pattern.fullmatch(excessive_offset)
+
+    for value in (excessive_precision, excessive_offset):
+        state = {
+            "numerical_constraints": [],
+            "temporal_constraints": [{
+                "field": "appointment_time",
+                "scope_entity": None,
+                "lower_bound": {"value": value, "inclusive": True},
+                "upper_bound": None,
+            }],
+            "active_permissions": [],
+        }
+        with pytest.raises(ValueError, match="invalid_temporal_boundary"):
+            normalize_constraint_state_v2(state)

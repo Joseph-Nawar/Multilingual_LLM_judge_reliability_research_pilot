@@ -15,7 +15,12 @@ from typing import Any
 
 
 NUMERIC_PATTERN = r"^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?$"
-TEMPORAL_PATTERN = r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$"
+TEMPORAL_PATTERN = (
+    r"^(?:000[1-9]|00[1-9]\d|0[1-9]\d{2}|[1-9]\d{3})-"
+    r"(?:0[1-9]|1[0-2])-(?:0[1-9]|[12]\d|3[01])T"
+    r"(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d(?:\.\d{1,6})?"
+    r"(?:Z|[+-](?:[01]\d|2[0-3]):[0-5]\d)$"
+)
 
 
 def _boundary_schema(*, temporal: bool) -> dict[str, Any]:
