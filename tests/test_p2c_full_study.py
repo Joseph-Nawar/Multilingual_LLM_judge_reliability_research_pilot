@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import hashlib
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -14,6 +15,12 @@ from multilingual_judge_pilot.p2c_review import (
     ingest_submission,
     parse_submission_jsonl,
 )
+from multilingual_judge_pilot.p2c_freeze import FreezeInventory, create_freeze, validate_reviews_for_freeze, verify_pre_freeze
+from multilingual_judge_pilot.preflight import canonical_scenario_sha256, variant_sha256
+from multilingual_judge_pilot.p2c_review import ReviewInventory
+from multilingual_judge_pilot.schema import LanguageCondition, TextSegment, TextSegmentKind
+from multilingual_judge_pilot.serialization import scenario_to_json
+from tests.p1_fixtures import numerical_revision_pair, structural_language_variant, with_language_variants
 
 
 def _annotation(item_id: str, slot: str, *, example_hash: str | None = None, semantic: str = "equivalent"):
@@ -103,6 +110,74 @@ def test_submission_requires_explanation_for_detected_problems():
     assert len(parse_submission_jsonl(_jsonl([row]), reviewer_slot="reviewer_slot_1", expected_hashes=expected_hashes, expected_scenario_hashes=scenario_hashes)) == 1
 
 
+def _complete_review_pair(*, reviewer_a_changes=None, reviewer_b_changes=None):
+    ids = tuple(_maps()[0])
+    a = [_annotation(item_id, "reviewer_slot_1") for item_id in ids]
+    b = [_annotation(item_id, "reviewer_slot_2") for item_id in ids]
+    for row in a:
+        row.update((reviewer_a_changes or {}).get(row["example_id"], {}))
+    for row in b:
+        row.update((reviewer_b_changes or {}).get(row["example_id"], {}))
+    return {"reviewer_slot_1": a, "reviewer_slot_2": b}
+
+
+def test_freeze_review_gate_rejects_missing_reviewer_export():
+    expected_hashes, scenario_hashes = _maps()
+
+    result = validate_reviews_for_freeze(
+        {"reviewer_slot_1": [_annotation(item_id, "reviewer_slot_1") for item_id in expected_hashes]},
+        [],
+        expected_hashes=expected_hashes,
+        expected_scenario_hashes=scenario_hashes,
+    )
+
+    assert result["ready"] is False
+    assert "both reviewer submissions are required" in result["blockers"]
+
+
+def test_freeze_review_gate_requires_adjudication_and_clean_content():
+    expected_hashes, scenario_hashes = _maps()
+    submissions = _complete_review_pair(reviewer_b_changes={"synthetic-b": {"decisive_update_dependence": "no"}})
+
+    unresolved = validate_reviews_for_freeze(
+        submissions,
+        [],
+        expected_hashes=expected_hashes,
+        expected_scenario_hashes=scenario_hashes,
+    )
+    assert unresolved["ready"] is False
+    assert any("missing adjudication" in blocker for blocker in unresolved["blockers"])
+
+    adjudication = {
+        "adjudication_schema_version": "p2b1-adjudication-2",
+        "example_id": "synthetic-b",
+        "example_sha256": "a" * 64,
+        "canonical_scenario_sha256": "b" * 64,
+        "reviewer_ids": ["reviewer_slot_1", "reviewer_slot_2"],
+        "adjudicator_id": "synthetic-adjudicator",
+        "outcome": "retain",
+        "rationale": "Synthetic example: preserve the documented uncertainty after adjudication.",
+    }
+    adjudicated = validate_reviews_for_freeze(
+        submissions,
+        [adjudication],
+        expected_hashes=expected_hashes,
+        expected_scenario_hashes=scenario_hashes,
+    )
+    assert adjudicated["ready"] is True
+    assert adjudicated["disagreement_report"]["disagreement_count"] == 1
+
+    defective = _complete_review_pair(reviewer_a_changes={"synthetic-a": {"semantic_relation": "meaning_changed", "notes": "Synthetic defect."}})
+    defect_result = validate_reviews_for_freeze(
+        defective,
+        [],
+        expected_hashes=expected_hashes,
+        expected_scenario_hashes=scenario_hashes,
+    )
+    assert defect_result["ready"] is False
+    assert any("content issue" in blocker for blocker in defect_result["blockers"])
+
+
 def test_disagreement_report_identifies_categorical_difference_without_resolving_it():
     reviewer_a = [_annotation(item_id, "reviewer_slot_1") for item_id in _maps()[0]]
     reviewer_b = [_annotation(item_id, "reviewer_slot_2", semantic="ambiguous" if item_id == "synthetic-b" else "equivalent") for item_id in _maps()[0]]
@@ -148,3 +223,154 @@ def test_submission_import_is_immutable_and_hash_bound(tmp_path: Path):
             expected_hashes=expected_hashes,
             expected_scenario_hashes=scenario_hashes,
         )
+
+
+def _synthetic_freeze_scenario():
+    source = numerical_revision_pair(scenario_id="synthetic-freeze")
+    variants = []
+    for history in source.histories:
+        for condition in LanguageCondition:
+            variant = structural_language_variant(
+                scenario_id=source.scenario_id,
+                history_id=history.history_id,
+                partition=source.partition,
+                condition=condition,
+            )
+            updated_turns = []
+            for turn in variant.turns:
+                language = "English" if turn.language.value == "en" else "Arabic"
+                content = f"Synthetic {language} initial request." if turn.turn_index == 0 else f"Synthetic {language} revision for "
+                segments = tuple(
+                    replace(segment, text=content if segment.kind is TextSegmentKind.LOCALIZED_NATURAL_LANGUAGE else segment.text)
+                    for segment in turn.segments
+                )
+                updated_turns.append(replace(turn, segments=segments))
+            variants.append(replace(variant, turns=tuple(updated_turns)))
+    return with_language_variants(source, tuple(variants))
+
+
+def _synthetic_review_inventory(scenario):
+    variant_hashes = {variant.derivative_id: variant_sha256(variant) for variant in scenario.language_variants}
+    scenario_hash = canonical_scenario_sha256(scenario)
+    scenario_hashes = {item_id: scenario_hash for item_id in variant_hashes}
+    return ReviewInventory(tuple(variant_hashes), variant_hashes, scenario_hashes)
+
+
+def _synthetic_submissions(inventory):
+    submissions = {}
+    for slot in ("reviewer_slot_1", "reviewer_slot_2"):
+        rows = []
+        for item_id in inventory.item_ids:
+            row = _annotation(item_id, slot, example_hash=inventory.expected_hashes[item_id])
+            row["canonical_scenario_sha256"] = inventory.expected_scenario_hashes[item_id]
+            rows.append(row)
+        submissions[slot] = rows
+    return submissions
+
+
+def test_freeze_creates_separate_opaque_inference_and_reference_artifacts(tmp_path: Path):
+    from multilingual_judge_pilot.p2c_review import ingest_submission
+
+    scenario = _synthetic_freeze_scenario()
+    review_inventory = _synthetic_review_inventory(scenario)
+    dataset = tmp_path / "dataset"
+    (dataset / "primary" / "scenarios").mkdir(parents=True)
+    (dataset / "primary" / "scenarios" / f"{scenario.scenario_id}.json").write_text(scenario_to_json(scenario), encoding="utf-8")
+    (dataset / "manifest.json").write_text(json.dumps({"dataset_frozen": False, "model_inference_performed": False}), encoding="utf-8")
+    submissions = _synthetic_submissions(review_inventory)
+    state_root = tmp_path / "review-state"
+    for slot, rows in submissions.items():
+        source = tmp_path / f"{slot}.jsonl"
+        source.write_bytes(_jsonl(rows))
+        ingest_submission(
+            slot,
+            source,
+            state_root,
+            expected_hashes=review_inventory.expected_hashes,
+            expected_scenario_hashes=review_inventory.expected_scenario_hashes,
+        )
+    inventory = FreezeInventory(1, 0, 1, 0, 1, 8, 0, 8, 0, 8)
+    package_validator = lambda _root: {"scenario_count": 1, "package_sha256": "c" * 64}
+
+    frozen = create_freeze(
+        dataset,
+        state_root,
+        tmp_path / "freezes",
+        review_inventory=review_inventory,
+        expected_inventory=inventory,
+        package_validator=package_validator,
+        code_revision="synthetic-test-revision",
+    )
+
+    root = Path(frozen["freeze_root"])
+    inference = [json.loads(line) for line in (root / "locked" / "inference-items.jsonl").read_text().splitlines()]
+    reference = json.loads((root / "reference" / "locked-reference-key.json").read_text())
+    configs = json.loads((root / "execution" / "run-configs.json").read_text())
+    assert len(inference) == 8
+    assert len(reference) == 8
+    assert set(row["item_id"] for row in inference) == set(reference)
+    assert all(set(row) == {"item_id", "language_condition", "action_turn_index", "conversation", "action", "public_tool_schema"} for row in inference)
+    assert all("reference_verdict" not in row and "effective_state" not in row for row in inference)
+    assert {row["language"] for item in inference for row in item["conversation"]} <= {"en", "ar"}
+    assert set(configs["configurations"]) == {"direct", "translation_first", "structured"}
+    assert frozen["reference_files_separated_from_inference"] is True
+
+
+def test_freeze_fails_closed_when_reviewer_export_is_missing(tmp_path: Path):
+    scenario = _synthetic_freeze_scenario()
+    review_inventory = _synthetic_review_inventory(scenario)
+    dataset = tmp_path / "dataset"
+    (dataset / "primary" / "scenarios").mkdir(parents=True)
+    (dataset / "primary" / "scenarios" / f"{scenario.scenario_id}.json").write_text(scenario_to_json(scenario), encoding="utf-8")
+    (dataset / "manifest.json").write_text(json.dumps({"dataset_frozen": False, "model_inference_performed": False}), encoding="utf-8")
+    inventory = FreezeInventory(1, 0, 1, 0, 1, 8, 0, 8, 0, 8)
+    with pytest.raises(ValueError, match="dataset freeze is blocked"):
+        create_freeze(
+            dataset,
+            tmp_path / "empty-review-state",
+            tmp_path / "freezes",
+            review_inventory=review_inventory,
+            expected_inventory=inventory,
+            package_validator=lambda _root: {"scenario_count": 1, "package_sha256": "c" * 64},
+            code_revision="synthetic-test-revision",
+        )
+
+
+def test_pre_freeze_rejects_stale_review_hashes_and_oracle_mismatch(tmp_path: Path):
+    from multilingual_judge_pilot.schema import ValidityLabel
+
+    scenario = _synthetic_freeze_scenario()
+    inventory = FreezeInventory(1, 0, 1, 0, 1, 8, 0, 8, 0, 8)
+    dataset = tmp_path / "dataset"
+    (dataset / "primary" / "scenarios").mkdir(parents=True)
+    (dataset / "manifest.json").write_text(json.dumps({"dataset_frozen": False, "model_inference_performed": False}), encoding="utf-8")
+    package_validator = lambda _root: {"scenario_count": 1, "package_sha256": "c" * 64}
+
+    stale = _synthetic_review_inventory(scenario)
+    stale_hashes = dict(stale.expected_hashes)
+    stale_hashes[stale.item_ids[0]] = "d" * 64
+    stale_inventory = ReviewInventory(stale.item_ids, stale_hashes, stale.expected_scenario_hashes)
+    (dataset / "primary" / "scenarios" / f"{scenario.scenario_id}.json").write_text(scenario_to_json(scenario), encoding="utf-8")
+    stale_result = verify_pre_freeze(
+        dataset,
+        tmp_path / "reviews",
+        review_inventory=stale_inventory,
+        expected_inventory=inventory,
+        package_validator=package_validator,
+    )
+    assert not stale_result["ready"]
+    assert "reviewer package" in stale_result["blockers"][0]
+
+    malformed_label_record = json.loads(scenario_to_json(scenario))
+    malformed_label_record["scenario"]["histories"][1]["declared_label"] = ValidityLabel.INVALID.value
+    (dataset / "primary" / "scenarios" / f"{scenario.scenario_id}.json").write_text(json.dumps(malformed_label_record), encoding="utf-8")
+    bad_inventory = _synthetic_review_inventory(scenario)
+    oracle_result = verify_pre_freeze(
+        dataset,
+        tmp_path / "reviews",
+        review_inventory=bad_inventory,
+        expected_inventory=inventory,
+        package_validator=package_validator,
+    )
+    assert not oracle_result["ready"]
+    assert "oracle" in oracle_result["blockers"][0] or "declared label" in oracle_result["blockers"][0]
