@@ -224,6 +224,12 @@ class OllamaLocalClient:
     def chat(self, payload: Mapping[str, object]) -> dict[str, object]:
         return self._json_request("POST", "/api/chat", payload)
 
+    def unload_model(self, model_tag: str) -> None:
+        """Unload one approved local model using Ollama's documented loopback API."""
+        if model_tag not in APPROVED_OLLAMA_TAGS | DIAGNOSTIC_OLLAMA_TAGS:
+            raise ContractError("Ollama unload accepts only a known approved local model tag")
+        self.chat({"model": model_tag, "messages": [], "keep_alive": 0, "stream": False})
+
 
 def _approved_model_tag(tag: str, *, diagnostic_only: bool = False) -> None:
     if type(diagnostic_only) is not bool:
