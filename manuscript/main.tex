@@ -1,0 +1,165 @@
+\documentclass[11pt]{article}
+
+% Draft uses the ACL review style. Obtain acl.sty and acl_natbib.bst from the
+% official ACL style bundle before compiling; the style bundle is not vendored.
+\usepackage[review]{acl}
+\usepackage{times}
+\usepackage{latexsym}
+\usepackage{microtype}
+\usepackage{inconsolata}
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{amsmath,amssymb}
+\usepackage{booktabs}
+\usepackage{graphicx}
+\usepackage{url}
+
+\title{Multilingual LLM-Judge Reliability Under Evolving Conversational Constraints}
+\author{Anonymous Author(s)}
+
+\newcommand{\MSA}{\textsc{MSA}}
+\newcommand{\pending}{\textit{Pending validation, freeze, and locked evaluation}}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+Language-model judges increasingly assess whether an agent's structured action follows instructions in a conversation. When those instructions evolve, a correct judgment requires tracking the active constraints, interpreting later updates in context, and comparing the proposed action with a public tool contract. We study this reliability problem in English and Modern Standard Arabic (\MSA) using a controlled, author-created dataset. Each primary scenario pairs two histories with the same proposed action but opposite validity labels derived by a deterministic state-transition oracle. Each history is rendered in four conditions that vary the language of the initial context and decisive turn (EN--EN, AR--AR, EN--AR, and AR--EN). The planned locked study compares direct judging, translation-first judging, and single-call structured judging with one local judge model; a separate no-change control is reported independently. Independent bilingual validation and the hash-bound dataset freeze are still pending, so no locked-study result is available. We describe the design and analysis commitments without presuming that language switching causes errors.
+\end{abstract}
+
+\section{Introduction}
+Large language models are commonly used as evaluators because they can score open-ended responses with less manual effort than a fully human evaluation pipeline. Prior studies have also documented evaluator biases and limits, making agreement on ordinary text-quality tasks an incomplete guarantee of reliable judgment \citep{zheng-etal-2023-mtbench}. In agent settings, the object of judgment may instead be a structured action whose validity depends on a multi-turn interaction, explicit tool requirements, and user constraints that change over time.
+
+This paper studies one narrow version of that problem: whether an LLM judge correctly determines if a proposed action satisfies the effective user instructions in an English or Arabic conversation. A budget ceiling, requested time, or permission may be introduced, revised, revoked, or preserved by a later turn. The evaluator must use the conversation available before the action, interpret the update, and compare the resulting requirements with the same structured action and public tool contract. The agent's task success is not the target outcome; the target is the judge's binary valid/invalid classification.
+
+Multilingual evaluator reliability is an active research topic. Existing studies report language-dependent behavior across evaluation tasks and judge models, and recent work extends reliability audits to multilingual agent trajectories \citep{fu-liu-2025-multilingual-judge,kc-2026-babeljudge}. Requirement-level localization studies further suggest that both evaluation content and the evaluator's language configuration can matter \citep{mahmood-etal-2026-localization}. These settings motivate controlled multilingual evaluation but do not settle how judges handle cross-turn revisions in mixed-language histories.
+
+We construct counterfactual pairs to make this question inspectable. Within a primary scenario, two histories preserve the same action and are designed to differ in the effective state that determines validity. Their deterministic reference labels are opposite. Each history is rendered in four initial/decisive-turn language conditions. This pairing supports comparisons within scenario while preventing the action itself from explaining a label difference. A separate auxiliary set tests no-change restatements; it is not merged into the primary estimate.
+
+The planned locked experiment compares direct multilingual judgment with a translation-first condition and a one-call structured condition. The proposed structured baseline reports constraint assessments before a binary verdict, but it receives no canonical state or label. All references are determined by a typed state representation and executable oracle outside the judge path. The study therefore distinguishes observable classification performance from claims about the model's internal reasoning.
+
+The paper makes a controlled task and measurement contribution rather than a claim that switching languages necessarily harms judges. The completed development pilot is exploratory and found no aggregate direct-judging penalty for code-switched conditions. The locked study remains unrun because the already-commissioned independent bilingual reviews have not been returned. We leave all locked results unfilled.
+
+\section{Research Questions and Hypotheses}
+The protocol asks:
+\begin{description}
+  \item[RQ1:] How accurately does the judge classify action validity in EN--EN, AR--AR, EN--AR, and AR--EN histories?
+  \item[RQ2:] How do errors vary with transition family, domain, validity class, and counterfactual history position?
+  \item[RQ3:] How do direct, translation-first, and single-call structured judging compare when the underlying evidence and judge backbone are held fixed?
+\end{description}
+
+The protocol's hypotheses remain provisional until the dataset and run configuration are frozen:
+\begin{description}
+  \item[H1:] Consequential constraint changes in cross-language conditions may produce more judgment errors than same-language conditions. The four condition-specific results are primary; the equally weighted cross-language versus same-language contrast is exploratory and is not, by itself, a causal estimate of switching.
+  \item[H2:] Some action-validity errors may arise when a judge reconstructs the effective constraints incorrectly. This study's ordinary verdicts cannot establish that mechanism. The existing development diagnostic was inconclusive, and the separate state-extraction evidence is reported only as exploratory.
+  \item[H3:] Translation-first and structured judging may leave errors unresolved relative to direct judging. This is a comparison to be measured, not an assumption about which method is better.
+\end{description}
+
+The hypotheses permit null, mixed, or contrary results. In particular, the protocol does not assume a code-switching penalty. The small auxiliary no-change control provides a separate exploratory comparison for later restatements that preserve the effective state; it does not fully identify the causal effect of consequential revision.
+
+\section{Related Work}
+\subsection{LLM Judges and Reliability}
+\citet{zheng-etal-2023-mtbench} examined LLMs as judges for open-ended assistant responses and documented biases including position and verbosity effects. Such work establishes the evaluator as an object of study, but preference or response-quality judgments do not directly test whether a structured action obeys a set of evolving constraints.
+
+\subsection{Multilingual Judging}
+\citet{fu-liu-2025-multilingual-judge} evaluate multilingual judges across multiple models, tasks, and languages and report that consistency can vary across languages. \citet{kc-2026-babeljudge} introduce controlled perturbations for auditing multilingual and agent-trajectory judging. \citet{mahmood-etal-2026-localization} examine requirement-level judgments under localized evaluator prompts and multiple languages, including Arabic. These studies make it important to report each language condition explicitly. Their tasks, language configurations, and label constructions differ from the paired binary action-validity task here; we make no direct quantitative comparison.
+
+\subsection{Agentic and Structured Evaluation}
+Recent work targets judges of tool-using agents. \citet{verma-etal-2026-agentjudgebench} evaluate judgments on dependency-structured tool workflows against programmatic references and compare conditions that expose or withhold ground truth. Separately, \citet{sheth-etal-2026-cross} study a criteria-based decomposition for cross-lingual evaluation of faithfulness tasks. These are close methodological neighbors: they motivate deterministic references and transparent intermediate criteria. AgentJudgeBench evaluates tool-call workflows rather than evolving bilingual user constraints; the decomposition work addresses faithfulness rather than action validity. Our implementations are specified as study baselines and are not claimed to reproduce either published method.
+
+\subsection{Dialogue State Tracking}
+Multi3WOZ provides culturally adapted multilingual and multi-parallel task-oriented dialogues with dialogue-state annotations \citep{hu-etal-2023-multi3}. It is useful for a separate observable state-extraction diagnostic, but state tracking and action-validity classification are different outcomes. Because aligned dialogues may be culturally adapted rather than literal translations, cross-language score differences on that benchmark do not isolate language alone. We therefore keep that analysis separate from the controlled action-validity experiment (Appendix~\ref{app:multi3woz}).
+
+\section{Controlled Dataset Construction}
+\subsection{Units and Partitions}
+The canonical scenario is the unit of content and partitioning. The primary set contains 48 scenarios: 12 development scenarios and 36 locked scenarios. Every primary scenario has two counterfactual histories, one canonical structured action, and four language-condition renderings per history, yielding 384 primary items. The auxiliary no-change set contains 12 additional locked scenarios, 24 histories, and 96 items. The complete private corpus therefore contains 60 scenarios, 120 histories, and 480 derived items. All histories and language variants of a canonical scenario stay in the same partition.
+
+The authored scenarios cover booking, customer operations, and scheduling, and the four transition families are introduction, numerical revision, permission revocation, and temporal revision. The primary blueprint covers all 12 domain-by-family cells. The auxiliary controls are separately identified and are not part of the primary estimand.
+
+\subsection{Counterfactual Histories and Reference Labels}
+For a primary pair, both histories use the same action semantics and action decision point. Their initial state and non-decisive requirements are controlled so that the intended decisive transition yields different active constraints and opposite valid/invalid labels for the fixed action. The paired histories are not separate independent scenarios. The auxiliary controls use different initial requirements; each later restatement leaves that history's effective state unchanged, while the same action remains valid in one history and invalid in the other.
+
+Reference labels are generated by a deterministic oracle over typed requirements, permissions, events, action fields, and a public tool contract. The oracle applies introductions, supersession, revocation, preservation, numeric bounds, and timezone-aware temporal bounds. It does not interpret conversation text. This separation makes the oracle an executable reference for formal state, not proof that the natural-language variants communicate that state correctly.
+
+\subsection{Language Conditions and Human Validation}
+The four conditions identify the language of the initial context and decisive later user turn: EN--EN, AR--AR, EN--AR, and AR--EN. Arabic is Modern Standard Arabic; dialectal Arabic and Arabizi are outside the study. User-facing text is localized while the structured action, tool names, and public schema remain invariant. The judge instruction is fixed in English.
+
+The two commissioned bilingual reviewers each receive the existing package for 56 scenarios and 448 variants, excluding the four scenarios previously covered in the concluded P2B pilot. Reviewers assess meaning, linguistic quality, action/tool semantics, controlled counterfactual differences, and the two distinct dependence constructs. Each row is bound to the language-variant and canonical-scenario hashes. At manuscript drafting, the review package is still marked not started; no independent validation or adjudication is claimed. The dataset is not frozen.
+
+\section{Experimental Design}
+After review reconciliation and a hash-bound freeze, the authorized locked study will evaluate 288 primary items from the 36 locked primary scenarios and 96 auxiliary control items. The primary comparison reports the four language conditions separately. Auxiliary-control results and matched primary-control contrasts remain secondary and exploratory.
+
+The sole planned judge is the local Ollama artifact `gemma4:12b-it-qat`. Its frozen model digest, prompts, output contracts, decoding parameters, parser, retry policy, input manifest, code revision, and run-order seed will be recorded in the private pre-inference manifest. Study calls use the existing local zero-cost setup; no paid or remote inference is authorized. No locked inference has occurred.
+
+The same original conversation, action, and public tool contract are supplied across ordinary baselines, except for the explicit language transformation in translation-first judging. Reference labels, canonical effective states, oracle verdicts, scenario-pair keys, and author-side classifications are excluded from ordinary judge requests. A separately named oracle-state intervention is not part of these three ordinary baselines and is not analyzed as deployable judgment.
+
+Before execution, opaque random item IDs and a reproducible randomized run order will be frozen. The order is shared across paired baselines; each call is isolated. No prompt, model, example, or threshold will be selected or altered after seeing locked predictions.
+
+\section{Judge and Baseline Implementations}
+\subsection{Judge Configuration}
+All baselines use the approved local Gemma 4 12B QAT judge and fixed Direct Prompt V2 or Structured Prompt V2. The binary contract accepts only a strict JSON validity verdict. Structured judging uses the versioned structured-validity V2 contract, a 512-token output limit, and strict consistency checks between the component assessments and final verdict. Malformed or contradictory output remains a format failure; it is not coerced into a prediction. The exact immutable model digest and configuration hashes will be included with the frozen run records.
+
+\subsection{Direct Multilingual Judging}
+The direct baseline makes one judge call for an item. The judge receives the original chronological conversation, the proposed action, and the public tool contract, then returns a binary valid/invalid verdict under Direct Prompt V2. The instruction is in English for all four user-language conditions.
+
+\subsection{Translation-First Judging}
+Translation-first applies the approved TranslateGemma V3 procedure to Arabic-bearing conversation content and then uses the same Direct Prompt V2 and judge. Role boundaries, chronology, source turns, and invariant literals are retained. Literal-validation policy V4 accepts a 12-hour/24-hour rendering only when it denotes the same ordered local clock time; it does not convert across dates or time zones and leaves strict checks for negation, permissions, identifiers, currency, and actual temporal changes intact. The translation model and prompt are unchanged. Translation does not resolve references from hidden canonical state. The same hash-bound translation artifact is reused across judge calls where feasible. Translation calls, outputs, failures, retries, and costs are reported separately; no label-informed repair is permitted.
+
+\subsection{Single-Call Structured Judging}
+The structured baseline uses one judge call over the same underlying conversation, action, and public tool contract. It asks the judge to assess relevant constraints and permissions, identify supporting turn indices, and return the binary verdict under Structured Prompt V2 and structured-validity V2. Only applicable requirements should be reported. A missing relevant constraint is a semantic coverage error, not an occasion for reference-driven correction. Component coverage, assessment correctness, verdict correctness, and parser validity are separate outcomes. The earlier three-call decomposition interface is not the primary structured baseline in this study.
+
+\section{Evaluation Methodology}
+\subsection{Primary and Secondary Outcomes}
+The primary outcome is exact binary validity accuracy. We will report accuracy, valid-action recall, and invalid-action recall for EN--EN, AR--AR, EN--AR, and AR--EN, with complete attempted-item denominators. The scenario is the clustering unit. Within-scenario and counterfactual-pair comparisons retain all paired histories and language variants. The cross-language versus same-language contrast is exploratory; neither a null estimate nor an imprecise interval establishes equivalence.
+
+Secondary analyses include paired direct-versus-translation and direct-versus-structured differences; counterfactual pair consistency; performance by transition family, domain, and action validity; and control-set results reported separately. Translation failures, judge-call failures, refusals, malformed output, and parse failures are distinguished. For structured outputs, evidence coverage and component assessment correctness are reported separately from final-verdict accuracy. For translation, retained artifacts are examined for meaning-changing errors without using reference labels to repair them.
+
+\subsection{Uncertainty and Dependence}
+Uncertainty intervals will resample canonical scenarios with all eight primary derivatives intact; matched control contrasts will preserve matched sets. A template-aware sensitivity analysis will be reported if the number and distribution of independent templates permit it. The interval method, resample count, and seed must be fixed in the pre-inference analysis manifest. The 288 primary items represent 36 scenario clusters, not 288 independent observations; the 96 control items represent 12 additional scenario clusters.
+
+\subsection{Failure Accounting}
+Every requested item remains in the attempted denominator. A model-produced invalid or unparseable response is reported and counted incorrect under the fixed primary rule. Technical failures remain explicitly recorded and are not silently discarded or repaired. Translation attempts and judge attempts have separate identifiers and failure categories. Any retries must follow the already specified fixed retry policy and retain each attempt. No locked output is available at this draft stage.
+
+\section{Ethical Considerations and Limitations}
+The task-oriented scenarios are author-created and are not presented as a representative sample of real user interactions. English and MSA{} are the only languages; Arabic dialects and other multilingual populations are outside scope. The dataset is small and template-based. Even with scenario-clustered uncertainty, template reuse may limit the effective number of independent designs. The auxiliary control has only 12 scenario clusters and supports exploratory analysis only.
+
+The private corpus contains locked labels and formal states and is therefore not included in the public repository. Reviewers receive only their assigned independent packet through the private review process. Model inference remains local, with a zero-dollar paid-API budget; no unpublished scenario is sent to a hosted service. The external Multi3WOZ data are not redistributed by this project, and its dataset license is treated separately from the repository's software license.
+
+The study uses one quantized local judge. Its findings will not generalize automatically to other model families or hosted systems. Translation-first performance combines translation fidelity with judging, so translation errors must be reported as part of that baseline rather than attributed solely to the judge. Structured output may fail format or coverage requirements even when its final label is correct. Bilingual human review is still pending; machine checks and the deterministic oracle cannot establish semantic equivalence or naturalness. The study cannot infer internal reasoning from explanations or verdicts alone, and it cannot support a broad population claim.
+
+\section{Study Status and Unfilled Results}
+\subsection{Exploratory Development Evidence}
+The completed 96-item development pilot covered 12 canonical scenarios, not 96 independent scenarios. Direct judging scored 80/96; translation-first scored 67/96; single-call structured judging scored 55/96. Direct accuracy was 40/48 on same-language items and 40/48 on code-switched items. Errors were concentrated in numerical and temporal revisions. These findings are exploratory, do not establish equivalence, and are not grounds for post hoc tuning. They do not imply that code-switching causes failures.
+
+\subsection{Locked Primary Results}
+\textbf{Locked study results are intentionally unfilled.} The bilingual review exports have not been received, the review and adjudication process is incomplete, and the dataset has not been frozen. No locked model inference has been performed.
+
+\begin{table}[t]
+\centering
+\small
+\begin{tabular}{lcccc}
+\toprule
+Condition & Accuracy & Valid recall & Invalid recall & Clustered interval \\
+\midrule
+EN--EN & Pending & Pending & Pending & Pending \\
+AR--AR & Pending & Pending & Pending & Pending \\
+EN--AR & Pending & Pending & Pending & Pending \\
+AR--EN & Pending & Pending & Pending & Pending \\
+\bottomrule
+\end{tabular}
+\caption{Locked primary estimates. All cells remain unfilled until validation, freeze, and authorized inference are complete.}
+\label{tab:locked-primary-pending}
+\end{table}
+
+Baseline comparisons, parser/translation failures, auxiliary-control estimates, and scenario-clustered contrasts are also \pending. No post-hoc or model-generated result is substituted for a missing human-validation or locked-inference result.
+
+\appendix
+\section{Separate Exploratory Multi3WOZ State-Extraction Diagnostic}
+\label{app:multi3woz}
+The Multi3WOZ evaluation is an external state-extraction diagnostic, not an action-validity experiment and not a test of code-switching. It used 100 paired English/Arabic checkpoints (200 language items) from the official evaluation split at repository revision \texttt{c65e80fe120704125255de5cf582a51ebaa285cd} (\url{https://github.com/cambridgeltl/multi3woz/tree/c65e80fe120704125255de5cf582a51ebaa285cd}). The saved original active slot/value F1 was 44.7\% in English and 15.0\% in Arabic; exact-state accuracy was 0/100 in each language, and 97/100 outputs per language passed the strict parser. The model was asked to extract an observable state from a conversation prefix; these outputs do not reveal internal reasoning.
+
+The audit verified that each prefix ended at the selected user turn and that its reference was taken from the following system metadata. However, the pinned legacy loader serializes the post-user system response before that user turn, while this experiment used chronological prefixes ending at the user. The run is therefore a user-prefix variant rather than an exact reproduction of the legacy loader protocol. The prompt exposed 37 slots while the legacy evaluator covers 30; normalization and a literal booking `none` convention also differ. Official-scope and shared-normalization sensitivities left exact-state accuracy at zero. The English--Arabic gap cannot be interpreted as a controlled language effect because the aligned conversations are culturally adapted rather than literal translations \citep{hu-etal-2023-multi3}. We report this result separately and do not pool it with the main action-validity outcomes or treat it as establishing H2.
+
+\bibliographystyle{acl_natbib}
+\bibliography{references}
+\end{document}
