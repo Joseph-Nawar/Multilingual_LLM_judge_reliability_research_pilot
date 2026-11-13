@@ -286,6 +286,9 @@ def _validate_corpus(
     summary = package_validator(dataset_root)
     if summary.get("scenario_count") != expected_inventory.scenarios:
         raise FreezeBlockedError("validated P2C scenario count does not match the required inventory")
+    package_hash = summary.get("package_sha256")
+    if not isinstance(package_hash, str) or len(package_hash) != 64 or any(char not in "0123456789abcdef" for char in package_hash):
+        raise FreezeBlockedError("validated P2C package must provide a lowercase SHA-256 digest")
     scenarios = _load_corpus(dataset_root)
     if len(scenarios) != expected_inventory.scenarios:
         raise FreezeBlockedError("canonical scenario files do not match the required inventory")
@@ -546,7 +549,10 @@ def create_freeze(
     development_manifest = _input_manifest(development_rows, package_sha256, ordered_ids=ordered_development, manifest_version=DEVELOPMENT_MANIFEST_VERSION)
 
     base = Path(output_root)
-    base.mkdir(parents=True, exist_ok=True)
+    base.mkdir(parents=True, exist_ok=True, mode=0o700)
+    os.chmod(base, 0o700)
+    if any(base.glob("freeze-*")):
+        raise FreezeBlockedError("a prior or partial freeze already exists; refusing to create a competing freeze")
     freeze_id = f"freeze-{uuid4().hex}"
     freeze_root = base / freeze_id
     try:
@@ -566,7 +572,12 @@ def create_freeze(
     run_configs = build_study_configs(locked_manifest, code_revision)
     files["execution/run-configs.json"] = _write_json(
         freeze_root / "execution" / "run-configs.json",
-        {"configurations": run_configs, "configurations_sha256": sha256_text(canonical_json(run_configs))},
+        {
+            "configurations": run_configs,
+            "configurations_sha256": sha256_text(canonical_json(run_configs)),
+            "development_configurations": build_study_configs(development_manifest, code_revision),
+            "development_configurations_sha256": sha256_text(canonical_json(build_study_configs(development_manifest, code_revision))),
+        },
         mode=0o600,
     )
     locked_ids = set(locked_manifest["item_hashes"])

@@ -10,6 +10,7 @@ from .judge_inference import (
     STRUCTURED_RESPONSE_CONTRACT_V2,
     BaselineKind,
     ProviderIdentity,
+    PromptSpec,
     RetryPolicy,
     RunConfig,
     TranslationConfig,
@@ -31,8 +32,8 @@ STUDY_RETRY_POLICY = RetryPolicy(
 )
 
 
-def build_study_configs(input_manifest: Mapping[str, object], code_revision: str) -> dict[str, dict[str, object]]:
-    """Build the fixed, hash-bound local run configurations approved for the study."""
+def build_run_configs(input_manifest: Mapping[str, object], code_revision: str) -> dict[str, tuple[RunConfig, PromptSpec]]:
+    """Return runtime config/prompt pairs without importing reference-side modules."""
     manifest_hash = input_manifest.get("manifest_sha256")
     if not isinstance(manifest_hash, str) or len(manifest_hash) != 64:
         raise ValueError("inference configuration requires a valid frozen input manifest hash")
@@ -83,19 +84,24 @@ def build_study_configs(input_manifest: Mapping[str, object], code_revision: str
         aggregation_version="single-structured-verdict-2",
         response_contract_version=STRUCTURED_RESPONSE_CONTRACT_V2,
     )
-    entries = {
+    return {
         "direct": (direct, DIRECT_PROMPT_V2),
         "translation_first": (translation_first, DIRECT_PROMPT_V2),
         "structured": (structured, STRUCTURED_PROMPT_V2),
     }
-    configurations = {}
+
+
+def build_study_configs(input_manifest: Mapping[str, object], code_revision: str) -> dict[str, dict[str, object]]:
+    """Build the fixed, hash-bound local run configurations approved for the study."""
+    entries = build_run_configs(input_manifest, code_revision)
+    configs = {}
     for name, (config, prompt) in entries.items():
         record = config.to_record()
         record["configuration_hash"] = config.config_hash
         record["prompt_sha256"] = sha256_text(prompt.instruction)
         record["output_limit"] = dict(config.decoding_parameters)["num_predict"]
-        configurations[name] = record
-    return configurations
+        configs[name] = record
+    return configs
 
 
 def verify_study_config_records(

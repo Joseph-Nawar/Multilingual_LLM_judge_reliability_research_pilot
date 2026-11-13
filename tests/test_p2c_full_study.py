@@ -13,14 +13,45 @@ from multilingual_judge_pilot.p2c_review import (
     ReviewValidationError,
     build_disagreement_report,
     ingest_submission,
+    ingest_adjudications,
+    load_current_adjudications,
     parse_submission_jsonl,
 )
 from multilingual_judge_pilot.p2c_freeze import FreezeInventory, create_freeze, validate_reviews_for_freeze, verify_pre_freeze
+from multilingual_judge_pilot.p2c_inference import FrozenExecutionError, load_frozen_inputs, prepare_translations, run_frozen_baseline
+from multilingual_judge_pilot.p2c_analysis import AnalysisError, analyze_frozen_runs
+from multilingual_judge_pilot.judge_inference import DeterministicMockProvider, ProviderIdentity, ProviderResponse
+from multilingual_judge_pilot.judge_baselines import TranslationCallError, TranslationOutput
 from multilingual_judge_pilot.preflight import canonical_scenario_sha256, variant_sha256
 from multilingual_judge_pilot.p2c_review import ReviewInventory
 from multilingual_judge_pilot.schema import LanguageCondition, TextSegment, TextSegmentKind
 from multilingual_judge_pilot.serialization import scenario_to_json
 from tests.p1_fixtures import numerical_revision_pair, structural_language_variant, with_language_variants
+
+
+class _SyntheticTranslator:
+    def __init__(self):
+        self._identity = ProviderIdentity("ollama-local", "translategemma:4b-it-q4_K_M", "sha256:eeb875b066dbbc91ad481f7423c61c23eccc5b96e85b50d6667753bdee726227")
+        self.calls = []
+
+    @property
+    def identity(self):
+        return self._identity
+
+    def translate(self, item, config):
+        from dataclasses import replace
+
+        self.calls.append(item.item_id)
+        turns = tuple(replace(turn, language="en") for turn in item.conversation)
+        return TranslationOutput(turns, "Synthetic fixture translation.", 1.0, 3, 4, "0")
+
+
+class _OneFailureTranslator(_SyntheticTranslator):
+    def translate(self, item, config):
+        if not self.calls:
+            self.calls.append(item.item_id)
+            raise TranslationCallError("synthetic_translation_failure", raw_response="synthetic raw translation error")
+        return super().translate(item, config)
 
 
 def _annotation(item_id: str, slot: str, *, example_hash: str | None = None, semantic: str = "equivalent"):
@@ -225,6 +256,59 @@ def test_submission_import_is_immutable_and_hash_bound(tmp_path: Path):
         )
 
 
+def test_adjudication_import_is_hash_bound_and_preserves_original_bytes(tmp_path: Path):
+    expected_hashes, scenario_hashes = _maps(("synthetic-a",))
+    reviewer_a = _annotation("synthetic-a", "reviewer_slot_1")
+    reviewer_b = _annotation("synthetic-a", "reviewer_slot_2")
+    reviewer_b["decisive_update_dependence"] = "no"
+    rows = [reviewer_a, reviewer_b]
+    source = tmp_path / "adjudications.jsonl"
+    adjudication = {
+        "adjudication_schema_version": "p2b1-adjudication-2",
+        "example_id": "synthetic-a",
+        "example_sha256": expected_hashes["synthetic-a"],
+        "canonical_scenario_sha256": scenario_hashes["synthetic-a"],
+        "reviewer_ids": ["reviewer_slot_1", "reviewer_slot_2"],
+        "adjudicator_id": "synthetic-adjudicator",
+        "outcome": "retain",
+        "rationale": "Synthetic adjudication note preserving an independently justified decision.",
+    }
+    original = _jsonl([adjudication])
+    source.write_bytes(original)
+
+    imported = ingest_adjudications(source, tmp_path / "state", annotations=rows)
+    current = load_current_adjudications(tmp_path / "state")
+    assert current["source_sha256"] == hashlib.sha256(original).hexdigest()
+    assert current["records"] == [adjudication]
+    assert (tmp_path / "state" / current["archived_path"]).read_bytes() == original
+
+
+def test_cli_status_reports_both_missing_reviewer_exports(tmp_path: Path, monkeypatch, capsys):
+    from multilingual_judge_pilot.preflight import blank_annotation_record
+    from scripts import p2c_full_study
+
+    dataset = tmp_path / "dataset"
+    for slot in ("reviewer_slot_1", "reviewer_slot_2"):
+        folder = dataset / "review-package" / slot
+        folder.mkdir(parents=True)
+        rows = [
+            blank_annotation_record(f"synthetic-{index:03d}", "a" * 64, "b" * 64)
+            for index in range(448)
+        ]
+        (folder / "annotation-template.jsonl").write_bytes(_jsonl(rows))
+    state = tmp_path / "state"
+    monkeypatch.setattr(p2c_full_study, "PRIVATE_ROOT", tmp_path.resolve())
+    args = p2c_full_study.build_parser().parse_args([
+        "--dataset-root", str(dataset), "--state-root", str(state), "status",
+    ])
+    assert p2c_full_study.dispatch(args) == 0
+    report = json.loads(capsys.readouterr().out)
+    assert report["review_inventory_count"] == 448
+    assert report["both_submissions_received"] is False
+    assert report["reviewers"]["reviewer_slot_1"]["status"] == "missing"
+    assert report["reviewers"]["reviewer_slot_2"]["status"] == "missing"
+
+
 def _synthetic_freeze_scenario():
     source = numerical_revision_pair(scenario_id="synthetic-freeze")
     variants = []
@@ -374,3 +458,134 @@ def test_pre_freeze_rejects_stale_review_hashes_and_oracle_mismatch(tmp_path: Pa
     )
     assert not oracle_result["ready"]
     assert "oracle" in oracle_result["blockers"][0] or "declared label" in oracle_result["blockers"][0]
+
+
+def _create_synthetic_freeze(tmp_path: Path):
+    from multilingual_judge_pilot.p2c_review import ingest_submission
+
+    scenario = _synthetic_freeze_scenario()
+    review_inventory = _synthetic_review_inventory(scenario)
+    dataset = tmp_path / "dataset"
+    (dataset / "primary" / "scenarios").mkdir(parents=True)
+    (dataset / "primary" / "scenarios" / f"{scenario.scenario_id}.json").write_text(scenario_to_json(scenario), encoding="utf-8")
+    (dataset / "manifest.json").write_text(json.dumps({"dataset_frozen": False, "model_inference_performed": False}), encoding="utf-8")
+    state_root = tmp_path / "review-state"
+    for slot, rows in _synthetic_submissions(review_inventory).items():
+        source = tmp_path / f"{slot}.jsonl"
+        source.write_bytes(_jsonl(rows))
+        ingest_submission(slot, source, state_root, expected_hashes=review_inventory.expected_hashes, expected_scenario_hashes=review_inventory.expected_scenario_hashes)
+    frozen = create_freeze(
+        dataset,
+        state_root,
+        tmp_path / "freezes",
+        review_inventory=review_inventory,
+        expected_inventory=FreezeInventory(1, 0, 1, 0, 1, 8, 0, 8, 0, 8),
+        package_validator=lambda _root: {"scenario_count": 1, "package_sha256": "c" * 64},
+        code_revision="synthetic-test-revision",
+    )
+    return Path(frozen["freeze_root"])
+
+
+def _mock_judge(verdict: str = "valid", *, structured: bool = False, count: int = 8):
+    identity = ProviderIdentity("ollama-local", "gemma4:12b-it-qat", "sha256:38044be4f923e5a55264ed7df4eaac2676651a905f735197c504045140c02bd3")
+    raw = json.dumps({"tool_contract": "satisfied", "constraint_assessments": [], "verdict": verdict}) if structured else json.dumps({"verdict": verdict})
+    return DeterministicMockProvider(identity, [ProviderResponse(raw, prompt_tokens=5, completion_tokens=3, cost_usd="0") for _ in range(count)])
+
+
+def test_frozen_execution_runs_all_baselines_and_resumes_without_duplicate_calls(tmp_path: Path):
+    freeze_root = _create_synthetic_freeze(tmp_path)
+    rows, _manifest, _freeze = load_frozen_inputs(freeze_root)
+    assert len(rows) == 8
+    direct = _mock_judge()
+    first = run_frozen_baseline(freeze_root, "direct", direct)
+    assert first["completed"] == 8
+    assert len(direct.calls) == 8
+    resumed = run_frozen_baseline(freeze_root, "direct", direct)
+    assert resumed["reused"] == 8
+    assert len(direct.calls) == 8
+
+    structured = _mock_judge(structured=True)
+    structured_result = run_frozen_baseline(freeze_root, "structured", structured)
+    assert structured_result["completed"] == 8
+    assert len(structured.calls) == 8
+    for request_json, _parameters in direct.calls + structured.calls:
+        request = json.loads(request_json)
+        assert set(request) == {"response_contract_version", "response_schema", "item_id", "instruction", "conversation", "action", "public_tool_schema"}
+        assert "reference_verdict" not in request and "effective_state" not in request
+
+    translator = _SyntheticTranslator()
+    translations = prepare_translations(freeze_root, translator)
+    assert translations["total"] == 8 and translations["failed"] == 0
+    assert len(translator.calls) == 8
+    assert prepare_translations(freeze_root, translator)["reused"] == 8
+    assert len(translator.calls) == 8
+    translated_judge = _mock_judge()
+    translated_run = run_frozen_baseline(freeze_root, "translation_first", translated_judge, translator=translator)
+    assert translated_run["completed"] == 8
+    assert len(translated_judge.calls) == 8
+    assert len(translator.calls) == 8
+
+    direct_result_files = sorted((freeze_root / "runs" / "direct" / "items").glob("*.result.json"))
+    source_hashes_before_score = {path.name: hashlib.sha256(path.read_bytes()).hexdigest() for path in direct_result_files}
+    analysis = analyze_frozen_runs(freeze_root)
+    repeated_analysis = analyze_frozen_runs(freeze_root)
+    assert repeated_analysis["analysis_sha256"] == analysis["analysis_sha256"]
+    assert {path.name: hashlib.sha256(path.read_bytes()).hexdigest() for path in direct_result_files} == source_hashes_before_score
+    direct_metrics = analysis["primary"]["direct"]["overall"]
+    assert direct_metrics["planned_denominator"] == 8
+    assert direct_metrics["accuracy"] == 0.5
+    assert direct_metrics["confusion_matrix"]["invalid"]["valid"] == 4
+    assert analysis["primary"]["direct"]["counterfactual_pair_consistency"]["paired_histories"] == 4
+    assert analysis["paired_baseline_comparisons"]["direct_vs_structured"]["paired_items"] == 8
+    assert analysis["run_status"]["direct"]["status"] == "completed"
+
+
+def test_translation_failure_is_retained_and_skips_only_its_judge_call(tmp_path: Path):
+    freeze_root = _create_synthetic_freeze(tmp_path)
+    translator = _OneFailureTranslator()
+    translated = prepare_translations(freeze_root, translator)
+    assert translated == {"translated": 7, "failed": 1, "reused": 0, "total": 8}
+    judge = _mock_judge()
+    result = run_frozen_baseline(freeze_root, "translation_first", judge, translator=translator)
+    assert result["completed"] == 8
+    assert result["translation_failures"] == 1
+    assert len(judge.calls) == 7
+    analysis = analyze_frozen_runs(freeze_root)
+    metrics = analysis["primary"]["translation_first"]["overall"]
+    assert metrics["planned_denominator"] == 8
+    assert metrics["translation_failures"] == 1
+    assert metrics["technical_missing"] == 0
+
+
+def test_frozen_execution_blocks_tampering_and_ambiguous_resume(tmp_path: Path):
+    freeze_root = _create_synthetic_freeze(tmp_path)
+    input_path = freeze_root / "locked" / "inference-items.jsonl"
+    original = input_path.read_bytes()
+    input_path.chmod(0o600)
+    input_path.write_bytes(original + b" ")
+    with pytest.raises(FrozenExecutionError, match="inference items hash"):
+        load_frozen_inputs(freeze_root)
+    input_path.write_bytes(original)
+    input_path.chmod(0o444)
+
+    rows, manifest, _freeze = load_frozen_inputs(freeze_root)
+    first_id = rows[0]["item_id"]
+    result_root = freeze_root / "runs" / "structured" / "items"
+    result_root.mkdir(parents=True)
+    name = hashlib.sha256(first_id.encode()).hexdigest()
+    (result_root / f"{name}.result.state.json").write_text(json.dumps({"status": "in_progress"}), encoding="utf-8")
+    provider = _mock_judge(structured=True)
+    with pytest.raises(FrozenExecutionError, match="ambiguous in-progress"):
+        run_frozen_baseline(freeze_root, "structured", provider)
+    assert provider.calls == []
+
+
+def test_analysis_rejects_modified_raw_result_records(tmp_path: Path):
+    freeze_root = _create_synthetic_freeze(tmp_path)
+    run_frozen_baseline(freeze_root, "direct", _mock_judge())
+    result_path = next((freeze_root / "runs" / "direct" / "items").glob("*.result.json"))
+    result_path.chmod(0o600)
+    result_path.write_bytes(result_path.read_bytes() + b" ")
+    result_path.chmod(0o444)
+    with pytest.raises(AnalysisError, match="result file hash mismatch"):
+        analyze_frozen_runs(freeze_root)

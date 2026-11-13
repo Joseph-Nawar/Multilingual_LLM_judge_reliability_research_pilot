@@ -288,6 +288,100 @@ def load_current_submissions(state_root: str | Path) -> dict[str, dict[str, obje
     return result
 
 
+def ingest_adjudications(
+    source: str | Path,
+    state_root: str | Path,
+    *,
+    annotations: Sequence[dict],
+    revision_reason: str | None = None,
+) -> dict[str, object]:
+    """Validate and immutably archive the full hash-bound adjudication JSONL export."""
+    source_path = Path(source)
+    try:
+        raw = source_path.read_bytes()
+    except OSError as exc:
+        raise ReviewValidationError("adjudication export cannot be read") from exc
+    records = _parse_jsonl(raw)
+    try:
+        audit = validate_adjudication_records(records, annotations)
+    except PreflightValidationError as exc:
+        raise ReviewValidationError(str(exc)) from exc
+    source_hash = hashlib.sha256(raw).hexdigest()
+    root = Path(state_root) / "adjudications"
+    root.mkdir(parents=True, exist_ok=True)
+    index_path = root / "index.json"
+    if index_path.exists():
+        try:
+            index = json.loads(index_path.read_text(encoding="utf-8"), object_pairs_hook=_unique_json_object)
+        except (OSError, json.JSONDecodeError, ReviewValidationError) as exc:
+            raise ReviewValidationError("adjudication import index is malformed") from exc
+        if not isinstance(index, dict) or index.get("schema_version") != "p2c-adjudication-index-1":
+            raise ReviewValidationError("adjudication import index has an unsupported schema")
+    else:
+        index = {"schema_version": "p2c-adjudication-index-1", "current": None, "history": []}
+    previous = index.get("current")
+    if isinstance(previous, dict) and previous.get("source_sha256") != source_hash and (not isinstance(revision_reason, str) or not revision_reason.strip()):
+        raise ReviewValidationError("a changed adjudication export requires a revision reason")
+    relative = Path("adjudications") / f"{source_hash}.jsonl"
+    archive = Path(state_root) / relative
+    archive.parent.mkdir(parents=True, exist_ok=True)
+    if archive.exists():
+        if hashlib.sha256(archive.read_bytes()).hexdigest() != source_hash:
+            raise ReviewValidationError("immutable adjudication archive path contains different bytes")
+    else:
+        fd = os.open(archive, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+        with os.fdopen(fd, "wb") as stream:
+            stream.write(raw)
+            stream.flush()
+            os.fsync(stream.fileno())
+    record = {
+        "source_filename": source_path.name,
+        "source_sha256": source_hash,
+        "source_bytes": len(raw),
+        "adjudication_count": len(records),
+        "archived_path": relative.as_posix(),
+        "imported_at": _utc_now(),
+        "supersedes_sha256": previous.get("source_sha256") if isinstance(previous, dict) else None,
+        "revision_reason": revision_reason.strip() if isinstance(previous, dict) and revision_reason else None,
+        "audit": {
+            "required_count": audit.required_count,
+            "adjudication_count": audit.adjudication_count,
+            "unresolved_count": audit.unresolved_count,
+            "incomplete_pair_count": audit.incomplete_pair_count,
+            "complete": audit.complete,
+        },
+    }
+    index["current"] = record
+    index.setdefault("history", []).append(record)
+    _atomic_json(root / "index.json", index)
+    return dict(record)
+
+
+def load_current_adjudications(state_root: str | Path) -> dict[str, object]:
+    """Read and hash-verify the current immutable adjudication export, if any."""
+    root = Path(state_root) / "adjudications"
+    index_path = root / "index.json"
+    if not index_path.exists():
+        return {"source_sha256": hashlib.sha256(b"").hexdigest(), "records": []}
+    try:
+        index = json.loads(index_path.read_text(encoding="utf-8"), object_pairs_hook=_unique_json_object)
+    except (OSError, json.JSONDecodeError, ReviewValidationError) as exc:
+        raise ReviewValidationError("adjudication import index is malformed") from exc
+    record = index.get("current") if isinstance(index, dict) else None
+    if not isinstance(record, dict):
+        raise ReviewValidationError("adjudication index has no current record")
+    archive = (Path(state_root) / str(record.get("archived_path", ""))).resolve()
+    if not archive.is_relative_to(Path(state_root).resolve()):
+        raise ReviewValidationError("adjudication archive path escapes the private state directory")
+    try:
+        raw = archive.read_bytes()
+    except OSError as exc:
+        raise ReviewValidationError("current immutable adjudication export is missing") from exc
+    if hashlib.sha256(raw).hexdigest() != record.get("source_sha256"):
+        raise ReviewValidationError("current immutable adjudication export hash has changed")
+    return {**record, "records": _parse_jsonl(raw)}
+
+
 def build_disagreement_report(
     submissions: Mapping[str, Sequence[Mapping[str, object]]],
     *,
