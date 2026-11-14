@@ -4,6 +4,8 @@
 
 The CLI never fills reviewer fields. Each reviewer export must be a complete 448-row JSONL file using the IDs, hashes, slot identity, and annotation contract from that reviewer’s existing package. Preserve the export source bytes; importing a revised export requires a short revision reason. Adjudication JSONL is imported separately and must bind each disagreement to the same variant and canonical-scenario hashes.
 
+The standalone offline reviewer workspaces and concise handoff instructions are documented in [P2C bilingual reviewer workspaces](p2c-review-studio.md). The generated reviewer pages remain private under `.research-data/`.
+
 ## Commands
 
 ```sh
