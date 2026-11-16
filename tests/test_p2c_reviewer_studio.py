@@ -267,3 +267,194 @@ def test_synthetic_completed_jsonl_is_accepted_by_existing_p2c_validator():
     assert all(row["decisive_update_dependence"] == "unclear" for row in rows)
     with pytest.raises(ReviewValidationError):
         parse_submission_jsonl(raw + raw.splitlines()[0] + b"\n", reviewer_slot=slot, expected_hashes=expected_hashes, expected_scenario_hashes=scenario_hashes)
+
+
+def test_q3_reason_choices_follow_the_selected_polarity_without_defaults():
+    from multilingual_judge_pilot.p2c_reason_taxonomy import allowed_reasons
+
+    assert allowed_reasons("q3", "yes") == (
+        "explicit_numeric",
+        "explicit_temporal",
+        "explicit_permission",
+        "complete_restatement",
+        "other",
+    )
+    assert allowed_reasons("q3", "no") == (
+        "earlier_numeric_needed",
+        "earlier_temporal_needed",
+        "earlier_permission_needed",
+        "earlier_referent_scope_needed",
+        "multiple_earlier_turns_needed",
+        "other",
+    )
+    assert allowed_reasons("q3", "unclear") == ("ambiguous_or_conflicting", "other")
+
+
+def test_q4_reason_choices_are_independent_and_follow_the_selected_polarity():
+    from multilingual_judge_pilot.p2c_reason_taxonomy import allowed_reasons
+
+    assert allowed_reasons("q4", "yes") == (
+        "decisive_instruction_invalidity",
+        "all_requirements_available",
+        "other",
+    )
+    assert allowed_reasons("q4", "no") == (
+        "earlier_numeric_constraint_needed",
+        "earlier_temporal_constraint_needed",
+        "earlier_permission_information_needed",
+        "earlier_unrelated_requirements_needed",
+        "multiple_earlier_requirements_needed",
+        "other",
+    )
+    assert allowed_reasons("q4", "unclear") == ("ambiguous_or_conflicting_information", "other")
+    assert "explicit_numeric" not in allowed_reasons("q4", "no")
+    assert "earlier_permission_information_needed" not in allowed_reasons("q3", "no")
+
+
+def test_each_taxonomy_reason_generates_its_selected_reason_and_turn():
+    from multilingual_judge_pilot.p2c_reason_taxonomy import allowed_reasons, build_rationale
+
+    mapping = {
+        ("q3", "yes"): {
+            "explicit_numeric": "Explicit numeric requirement",
+            "explicit_temporal": "Explicit temporal requirement",
+            "explicit_permission": "Explicit permission state",
+            "complete_restatement": "Complete restatement",
+            "other": "Other / not covered",
+        },
+        ("q3", "no"): {
+            "earlier_numeric_needed": "Earlier numeric value needed",
+            "earlier_temporal_needed": "Earlier temporal value needed",
+            "earlier_permission_needed": "Earlier permission state needed",
+            "earlier_referent_scope_needed": "Earlier referent or scope needed",
+            "multiple_earlier_turns_needed": "Multiple earlier turns needed",
+            "other": "Other / not covered",
+        },
+        ("q3", "unclear"): {
+            "ambiguous_or_conflicting": "Ambiguous or conflicting interpretation",
+            "other": "Other / not covered",
+        },
+        ("q4", "yes"): {
+            "decisive_instruction_invalidity": "The decisive instruction alone establishes invalidity",
+            "all_requirements_available": "All relevant requirements are available",
+            "other": "Other / not covered",
+        },
+        ("q4", "no"): {
+            "earlier_numeric_constraint_needed": "Earlier numerical constraint needed",
+            "earlier_temporal_constraint_needed": "Earlier temporal constraint needed",
+            "earlier_permission_information_needed": "Earlier permission information needed",
+            "earlier_unrelated_requirements_needed": "Earlier unrelated requirements needed",
+            "multiple_earlier_requirements_needed": "Multiple earlier requirements needed",
+            "other": "Other / not covered",
+        },
+        ("q4", "unclear"): {
+            "ambiguous_or_conflicting_information": "Ambiguous or conflicting information",
+            "other": "Other / not covered",
+        },
+    }
+    for (question, answer), labels in mapping.items():
+        assert set(allowed_reasons(question, answer)) == set(labels)
+        for reason_id, label in labels.items():
+            selection = {
+                "reasons": [reason_id],
+                "supporting_turns": [4, 5] if reason_id.startswith("multiple_") else [4],
+                "fields": ["booking_window"] if "temporal" in reason_id else ["amount"],
+                "explanation": "The selected turn gives the specific evidence for this choice." if reason_id in {
+                    "other", "ambiguous_or_conflicting", "ambiguous_or_conflicting_information"
+                } else "",
+            }
+            rationale = build_rationale(question, answer, selection)
+            assert label in rationale
+            assert "4" in rationale
+            if reason_id.startswith("multiple_"):
+                assert "5" in rationale
+
+
+def test_multiple_reasons_turns_and_fields_are_rendered_without_losing_q3_q4_separation():
+    from multilingual_judge_pilot.p2c_reason_taxonomy import build_rationale
+
+    q3 = build_rationale("q3", "no", {
+        "reasons": ["earlier_numeric_needed", "earlier_permission_needed"],
+        "supporting_turns": [1, 3],
+        "fields": ["amount", "permission state"],
+        "explanation": "",
+    })
+    q4 = build_rationale("q4", "yes", {
+        "reasons": ["decisive_instruction_invalidity"],
+        "supporting_turns": [4],
+        "fields": ["maximum amount"],
+        "explanation": "",
+    })
+
+    assert q3 == "Earlier numeric value needed; Earlier permission state needed. Supporting turn(s): 1, 3. Requirement/field: amount, permission state."
+    assert q4 == "The decisive instruction alone establishes invalidity. Supporting turn(s): 4. Requirement/field: maximum amount."
+    assert "Earlier permission state needed" not in q4
+    assert "The decisive instruction alone establishes invalidity" not in q3
+
+
+def test_rationale_rejects_missing_incompatible_duplicate_and_unsupported_evidence():
+    from multilingual_judge_pilot.p2c_reason_taxonomy import build_rationale
+
+    base = {"reasons": ["explicit_numeric"], "supporting_turns": [2], "fields": [], "explanation": ""}
+    with pytest.raises(ValueError, match="at least one compatible reason"):
+        build_rationale("q3", "yes", {**base, "reasons": []})
+    with pytest.raises(ValueError, match="incompatible"):
+        build_rationale("q3", "no", base)
+    with pytest.raises(ValueError, match="unique"):
+        build_rationale("q3", "yes", {**base, "reasons": ["explicit_numeric", "explicit_numeric"]})
+    with pytest.raises(ValueError, match="supporting turn"):
+        build_rationale("q3", "yes", {**base, "supporting_turns": []})
+    with pytest.raises(ValueError, match="two distinct"):
+        build_rationale("q3", "no", {
+            "reasons": ["multiple_earlier_turns_needed"],
+            "supporting_turns": [2],
+            "fields": [],
+            "explanation": "",
+        })
+    with pytest.raises(ValueError, match="explanation"):
+        build_rationale("q3", "unclear", {
+            "reasons": ["ambiguous_or_conflicting"],
+            "supporting_turns": [2],
+            "fields": [],
+            "explanation": "",
+        })
+
+
+def test_structured_issue_notes_identify_code_turn_field_and_expected_observed_values():
+    from multilingual_judge_pilot.p2c_reason_taxonomy import build_issue_notes
+
+    reports = [
+        {
+            "type": "incorrect_number",
+            "turn_index": 4,
+            "field": "maximum amount",
+            "expected": "$80",
+            "observed": "$90",
+            "explanation": "",
+        },
+        {
+            "type": "other",
+            "turn_index": 6,
+            "field": "permission scope",
+            "expected": "",
+            "observed": "",
+            "explanation": "The wording changes which account the approval applies to.",
+        },
+    ]
+
+    assert build_issue_notes(reports) == (
+        'Incorrect number (turn 4; field "maximum amount"): expected "$80"; observed "$90".\n'
+        'Other / not covered (turn 6; field "permission scope"): The wording changes which account the approval applies to.'
+    )
+    assert build_issue_notes([]) == ""
+
+
+def test_structured_issue_notes_reject_generic_or_incomplete_problem_explanations():
+    from multilingual_judge_pilot.p2c_reason_taxonomy import build_issue_notes
+
+    with pytest.raises(ValueError, match="turn"):
+        build_issue_notes([{"type": "incorrect_time", "field": "start time", "expected": "09:00", "observed": "10:00", "explanation": ""}])
+    with pytest.raises(ValueError, match="expected and observed"):
+        build_issue_notes([{"type": "incorrect_number", "turn_index": 2, "field": "amount", "expected": "", "observed": "90", "explanation": ""}])
+    with pytest.raises(ValueError, match="specific explanation"):
+        build_issue_notes([{"type": "other", "turn_index": 2, "field": "scope", "expected": "", "observed": "", "explanation": "Wrong."}])
