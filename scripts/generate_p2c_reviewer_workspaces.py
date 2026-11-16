@@ -19,12 +19,15 @@ if str(REPO_ROOT) not in sys.path:
 
 from multilingual_judge_pilot.p2c_review import REVIEWER_SLOTS
 from multilingual_judge_pilot.preflight import ANNOTATION_SCHEMA_VERSION, blank_annotation_record
+from multilingual_judge_pilot.p2c_reason_taxonomy import REASON_TAXONOMY_VERSION, reason_taxonomy_data
 
 
 LANGUAGE_CONDITIONS = ("EN-EN", "AR-AR", "EN-AR", "AR-EN")
 EXPECTED_SCENARIOS = 56
 EXPECTED_VARIANTS = 448
-WORKSPACE_VERSION = "p2c-bilingual-review-studio-3"
+WORKSPACE_VERSION = "p2c-bilingual-review-studio-5"
+REVIEW_LOGIC_JS = REPO_ROOT / "scripts" / "p2c_review_logic.js"
+REVIEW_APP_JS = REPO_ROOT / "scripts" / "p2c_reviewer_studio_app.js"
 REQUIRED_CHECKLIST_FIELDS = set(blank_annotation_record("workspace-check", "0" * 64, "0" * 64)["checklist"])
 FORBIDDEN_PACKET_KEYS = {
     "reference_verdict",
@@ -48,6 +51,34 @@ FORBIDDEN_PACKET_KEYS = {
 _HASH = re.compile(r"^[0-9a-f]{64}$")
 _SCRIPT = re.compile(r"<script\b(?P<attrs>[^>]*)>(?P<body>.*?)</script\s*>", re.IGNORECASE | re.DOTALL)
 _ATTR_ID = re.compile(r"\bid\s*=\s*(['\"])(.*?)\1", re.IGNORECASE)
+COMPATIBILITY_COPY = (
+    "Q3 and Q4 are separate. Choose Yes, No, or Unclear, then select compatible reason(s) and supporting turn(s); no answer or reason is preselected. The generated rationales show your selected reasons and evidence. "
+    "Version 3 checkpoints retain structured selections. Earlier draft checkpoints import only when the reviewer slot and every source hash match; imported text stays visible and is not converted to reason selections. A mismatched checkpoint is rejected without changing the file."
+)
+PREVIOUS_COMPATIBILITY_COPY = (
+    "Q3 and Q4 are separate. Choose Yes, No, or Unclear, then select compatible reason(s) and supporting turn(s); no answer or reason is preselected. The generated rationales show your selected reasons and evidence. "
+    "Version 2 checkpoints retain structured selections. Earlier draft checkpoints import only when the reviewer slot and every source hash match; imported text stays visible and is not converted to reason selections. A mismatched checkpoint is rejected without changing the file."
+)
+STRUCTURED_REVIEW_CSS = """
+/* Structured annotation controls */
+.reason-fieldset{border:0;border-top:1px solid #e6ebe6;padding:12px 0 0;margin:12px 0 0;min-width:0}
+.reason-fieldset legend{font-size:12px;font-weight:760;color:#52625d;padding:0 4px 0 0}
+.structured-choices,.reason-options{display:grid;gap:6px;margin-top:8px}
+.requirement-field-choices{max-height:220px;overflow:auto}
+.structured-choice,.turn-choice{display:flex;align-items:flex-start;gap:9px;padding:7px 8px;border:1px solid #e2e8e2;border-radius:6px;background:#fff;font-size:12px;line-height:1.5;cursor:pointer}
+.structured-choice input,.turn-choice input{margin:2px 0 0;accent-color:var(--accent);flex:0 0 auto}
+.structured-choice:has(input:checked),.turn-choice:has(input:checked){border-color:var(--accent);background:#f1f7f1}
+.reason-incompatible{border-color:#dcb6a2;background:#fff8f3;color:#8f421d}
+.turn-choices{display:grid;gap:5px;max-height:190px;overflow:auto;margin-top:8px}
+.turn-choice span{min-width:0;overflow-wrap:anywhere}.turn-choice b{white-space:nowrap}
+.field-label{display:grid;gap:5px;margin-top:10px;font-size:12px;font-weight:700;color:#44554d}
+.field-label input,.field-label select{min-width:0;width:100%;padding:9px 10px;border:1px solid #d9e3db;border-radius:6px;background:#fff;font-size:12px;color:var(--ink)}
+.generated-rationale{margin-top:10px;padding:9px 11px;border-left:3px solid var(--accent);background:#f4f8f2;font-size:12px;line-height:1.55;overflow-wrap:anywhere}
+.generated-rationale p{margin:4px 0 0}.legacy-evidence{margin-top:9px;padding:8px 10px;border:1px solid #ead7b7;border-radius:6px;background:#fffaf0;font-size:12px;overflow-wrap:anywhere}
+.legacy-evidence summary{cursor:pointer;font-weight:700}.legacy-evidence p{margin:8px 0 0}
+.issue-trigger{padding:11px 0;border-top:1px solid #edf0ec}.issue-trigger h4{font-size:12px;margin:0 0 8px}.issue-report{padding:10px;border:1px solid #dfe7df;border-radius:7px;background:#fafcf9;margin:8px 0}
+.issue-report-head{display:flex;justify-content:space-between;align-items:center;gap:8px;font-size:12px}.evidence-pair{display:grid;grid-template-columns:1fr 1fr;gap:8px}.clean-note{padding:8px;background:#f5f8f4;border-radius:6px}
+"""
 
 
 class WorkspaceBuildError(ValueError):
@@ -358,10 +389,11 @@ def source_fingerprint(
         raise WorkspaceBuildError("template file hash is malformed")
     body = {
         "workspace_version": WORKSPACE_VERSION,
+        "reason_taxonomy_version": REASON_TAXONOMY_VERSION,
         "reviewer_slot": reviewer_slot,
         "annotation_schema_version": ANNOTATION_SCHEMA_VERSION,
         "package_manifest_sha256": package_manifest_sha256,
-        "studio_html_sha256": _sha256(source_html.encode("utf-8")),
+        "studio_html_sha256": _sha256(_fingerprint_shell_html(source_html).encode("utf-8")),
         "packet_file_sha256": dict(sorted(packet_sha256.items())) if packet_sha256 is not None else {
             scenario_id: _sha256(_canonical_json(packet).encode("utf-8"))
             for scenario_id, packet in sorted(packet_map.items())
@@ -369,6 +401,124 @@ def source_fingerprint(
         "template_file_sha256": template_sha256 or _sha256(_canonical_json(list(template_rows)).encode("utf-8")),
     }
     return _sha256(_canonical_json(body).encode("utf-8"))
+
+
+def _fingerprint_shell_html(html: str) -> str:
+    """Hash stable presentation markup plus the explicit workspace version.
+
+    Generated packet payloads and generated JavaScript are replaced before
+    hashing. The workspace version covers application behavior, so regenerating
+    from the current standalone page keeps the fingerprint stable while a new
+    version still invalidates incompatible workspaces.
+    """
+    html = _canonical_shell_markup(html)
+    output = []
+    position = 0
+    app_count = 0
+    for match in _SCRIPT.finditer(html):
+        output.append(html[position:match.start()])
+        id_match = _ATTR_ID.search(match.group("attrs"))
+        script_id = id_match.group(2) if id_match else ""
+        body = match.group("body")
+        if script_id == "embedded-review-data" or script_id == "p2c-review-logic":
+            output.append("")
+        elif script_id == "embedded-scenarios":
+            output.append(match.group(0)[:match.start("body") - match.start()] + "[]" + match.group(0)[match.end("body") - match.start():])
+        elif script_id == "p2c-review-app" or "const SOURCE = JSON.parse(document.getElementById('embedded-scenarios').textContent);" in body:
+            app_count += 1
+            output.append("<!-- versioned review application -->")
+        else:
+            output.append(match.group(0))
+        position = match.end()
+    output.append(html[position:])
+    if app_count != 1:
+        raise WorkspaceBuildError("reviewer HTML must contain exactly one review application script")
+    return re.sub(r"\n{2,}", "\n", "".join(output))
+
+
+def _canonical_shell_markup(html: str) -> str:
+    """Remove generator-owned copy and style changes before hashing the shell."""
+    html = re.sub(
+        r"\s*/\* Structured annotation controls \*/.*?\.clean-note\{[^}]*\}\s*",
+        "",
+        html,
+        count=1,
+        flags=re.DOTALL,
+    )
+    html = re.sub(r"Reviewer slot [12] · English \+ Modern Standard Arabic", "Reviewer slot N · English + Modern Standard Arabic", html)
+    html = re.sub(r"(<title>Bilingual review workspace · Reviewer )[12](</title>)", r"\1N\2", html)
+    html = _replace_setup_panel_with_fingerprint_marker(html)
+    for copy in (
+        "When all 448 are complete, attach the original template and the 56 reviewer packet JSON files. You can review first and attach them later.",
+        "When all 448 are complete, attach the original template and packet folder to export a verified JSONL file for the researcher.",
+        "When all 448 variants are complete, export the verified JSONL directly from this page. The export contains only your answers.",
+        "Save a checkpoint JSON periodically. When all 448 are complete, export the verified JSONL file directly from this page. The export contains only your own answers.",
+        "Save a checkpoint JSON periodically. When all 448 variants are complete, export the verified JSONL file directly from this page. The export contains only your own answers.",
+    ):
+        html = html.replace(copy, "__P2C_EXPORT_GUIDANCE__")
+    for copy in (
+        "You can mark all eight as passing after inspection, or flag individual problems.",
+        "Answer each of the eight checklist items separately for every variant, or flag individual problems. Add notes when anything is wrong or uncertain.",
+        "Answer all eight checklist items independently. Clean variants need no notes; flagged problems require structured evidence.",
+        "Answer all eight checklist items separately for every variant. Clean variants need no notes; flagged problems require specific structured evidence and the page generates the notes field.",
+    ):
+        html = html.replace(copy, "__P2C_CHECKLIST_GUIDANCE__")
+    html = html.replace(
+        "Each must receive its own assessment. Answers, reasons, and rationales are never copied to another variant.",
+        "__P2C_INDEPENDENCE_GUIDANCE__",
+    ).replace(
+        "Each must receive its own assessment. Answers and rationales are never copied to another variant.",
+        "__P2C_INDEPENDENCE_GUIDANCE__",
+    )
+    html = html.replace("Be independent. " + COMPATIBILITY_COPY, "Be independent.")
+    html = html.replace("Be independent. " + PREVIOUS_COMPATIBILITY_COPY, "Be independent.")
+    return html.replace(COMPATIBILITY_COPY, "").replace(PREVIOUS_COMPATIBILITY_COPY, "")
+
+
+def _replace_setup_panel_with_fingerprint_marker(html: str) -> str:
+    """Normalize the setup panel whose copy and controls the generator replaces."""
+    start_pattern = re.compile(
+        r"<div\b(?=[^>]*\bclass\s*=\s*(['\"])[^'\"]*\bsetup-panel\b[^'\"]*\1)[^>]*>",
+        re.IGNORECASE,
+    )
+    match = start_pattern.search(html)
+    if match is None:
+        return html
+    depth = 0
+    for token in re.finditer(r"</?div\b[^>]*>", html[match.start():], re.IGNORECASE):
+        is_close = token.group(0).lstrip().startswith("</")
+        depth += -1 if is_close else 1
+        if depth == 0:
+            end = match.start() + token.end()
+            return html[:match.start()] + '<div class="setup-panel">__P2C_SETUP_PANEL__</div>' + html[end:]
+    raise WorkspaceBuildError("reviewer setup panel markup is unbalanced")
+
+
+def legacy_source_fingerprints_from_workspace(
+    previous_html: str,
+    reviewer_slot: str,
+    current_bindings: Mapping[str, Mapping[str, object]],
+) -> tuple[str, ...]:
+    """Allow prior checkpoints only when the prior page has identical bindings."""
+    matches = []
+    for script in _SCRIPT.finditer(previous_html):
+        id_match = _ATTR_ID.search(script.group("attrs"))
+        if id_match and id_match.group(2) == "embedded-review-data":
+            matches.append(script)
+    if len(matches) != 1:
+        return ()
+    try:
+        data = _loads_json(matches[0].group("body"), "previous embedded review package")
+    except WorkspaceBuildError:
+        return ()
+    if (
+        data.get("reviewer_slot") != reviewer_slot
+        or data.get("format") not in {"p2c-embedded-review-package-1", "p2c-embedded-review-package-2"}
+        or data.get("bindings") != dict(current_bindings)
+    ):
+        return ()
+    candidates = [data.get("source_fingerprint"), *(data.get("legacy_source_fingerprints", []))]
+    return tuple(dict.fromkeys(value for value in candidates if _valid_hash(value)))
 
 
 def _replace_script(html: str, script_id: str, body: str, *, append_scripts: Sequence[tuple[str, str]] = ()) -> str:
@@ -386,181 +536,127 @@ def _replace_script(html: str, script_id: str, body: str, *, append_scripts: Seq
 
 
 def _rewrite_app_script(html: str) -> str:
-    matches = [m for m in _SCRIPT.finditer(html) if "const SOURCE = JSON.parse(document.getElementById('embedded-scenarios').textContent);" in m.group("body")]
-    if len(matches) != 1:
-        raise WorkspaceBuildError("owner HTML app script is missing or ambiguous")
-    match = matches[0]
-    app = match.group("body")
+    """Replace the shell application with the versioned offline review UI."""
+    for match in reversed(list(_SCRIPT.finditer(html))):
+        id_match = _ATTR_ID.search(match.group("attrs"))
+        if id_match and id_match.group(2) == "p2c-review-logic":
+            html = html[:match.start()] + html[match.end():]
 
-    source_binding = re.compile(
-        r"const SOURCE = JSON.parse\(document\.getElementById\('embedded-scenarios'\)\.textContent\);\s*"
-        r"const SLOT = ['\"]reviewer_slot_2['\"];\s*"
-        r"const SOURCE_FINGERPRINT = ['\"][0-9a-f]{64}['\"]\s*;"
-    )
-    app, source_count = source_binding.subn(
-        "const SOURCE = JSON.parse(document.getElementById('embedded-scenarios').textContent);\n"
-        "const REVIEW_DATA = JSON.parse(document.getElementById('embedded-review-data').textContent);\n"
-        "const SLOT = REVIEW_DATA.reviewer_slot;\nconst SOURCE_FINGERPRINT = REVIEW_DATA.source_fingerprint;",
-        app,
-    )
-    if source_count != 1:
-        raise WorkspaceBuildError("owner HTML source-binding declarations differ from the approved version")
-    replacements = (
-        ("const localKey='p2c-reviewer-workspace-slot2-v1-'+SOURCE_FINGERPRINT;", "const localKey='p2c-reviewer-workspace-'+SLOT+'-'+SOURCE_FINGERPRINT;"),
-        ("const ui={scenario:0,history:0,condition:0,answers:{},template:null,packets:null,bindings:null,fromSource:false};", "const ui={scenario:0,history:0,condition:0,answers:{},template:REVIEW_DATA.template,packets:REVIEW_DATA.packets,bindings:null,fromSource:true};"),
-    )
-    for old, new in replacements:
-        if app.count(old) != 1:
-            raise WorkspaceBuildError(f"owner HTML app version lacks expected binding: {old[:40]}")
-        app = app.replace(old, new, 1)
-
-    restore_block = re.compile(r"function restore\(data\)\{.*?(?=\nfunction updateGlobal\(\))", re.DOTALL)
-    hardened_restore = """function validateDraftAnswers(answers){
-if(!answers||typeof answers!=='object'||Array.isArray(answers))throw Error('Checkpoint answers must be an object.');
-const validIds=new Set(ITEMS.map(x=>x.key));
-const answerFields=['semantic_relation','linguistic_quality','decisive_update_dependence','decisive_update_dependence_rationale','whole_action_dependence','whole_action_dependence_rationale','issue_codes','checklist','notes'];
-for(const [key,a] of Object.entries(answers)){
- if(!validIds.has(key)||!a||typeof a!=='object'||Array.isArray(a)||Object.keys(a).length!==answerFields.length||answerFields.some(f=>!(f in a)))throw Error('Checkpoint contains an unknown item ID or malformed answer.');
- if(!['','equivalent','meaning_changed','ambiguous'].includes(a.semantic_relation)||!['','natural','acceptable_variation','unnatural_or_unclear'].includes(a.linguistic_quality)||!['','yes','no','unclear'].includes(a.decisive_update_dependence)||!['','yes','no','unclear'].includes(a.whole_action_dependence))throw Error('Checkpoint contains an unsupported assessment value.');
- for(const f of ['decisive_update_dependence_rationale','whole_action_dependence_rationale','notes'])if(typeof a[f]!=='string')throw Error('Checkpoint contains malformed text fields.');
- if(!Array.isArray(a.issue_codes)||a.issue_codes.some(x=>!ISSUE_CODES.some(([code])=>code===x))||new Set(a.issue_codes).size!==a.issue_codes.length)throw Error('Checkpoint contains invalid issue codes.');
- if(!a.checklist||typeof a.checklist!=='object'||Array.isArray(a.checklist)||Object.keys(a.checklist).length!==CK.length||CK.some(([k])=>!(k in a.checklist)||!(a.checklist[k]===null||typeof a.checklist[k]==='boolean')))throw Error('Checkpoint contains malformed checklist answers.');
-}
-return answers}
-function restore(data){if(!data||data.format!=='p2c-review-draft-1'||data.slot!==SLOT||data.source_fingerprint!==SOURCE_FINGERPRINT)throw Error('Wrong checkpoint format, reviewer slot, or source package version.');
-const answers=validateDraftAnswers(data.answers);const p=data.position;if(!Array.isArray(p)||p.length!==3||p.some(x=>!Number.isInteger(x)))throw Error('Checkpoint navigation position is malformed.');
-ui.answers=answers;ui.scenario=Math.max(0,Math.min(SOURCE.length-1,p[0]));ui.history=Math.max(0,Math.min(1,p[1]));ui.condition=Math.max(0,Math.min(3,p[2]));save();renderAll()}"""
-    if restore_block.search(app):
-        app, restore_count = restore_block.subn(hardened_restore, app)
-        if restore_count != 1:
-            raise WorkspaceBuildError("owner HTML draft restore logic differs from the approved version")
-    else:
-        raise WorkspaceBuildError("owner HTML draft restore function is missing or has changed")
-    old_local_restore = "ui.answers=saved.answers||{};ui.scenario=saved.position?.[0]||0;ui.history=saved.position?.[1]||0;ui.condition=saved.position?.[2]||0"
-    new_local_restore = "ui.answers=validateDraftAnswers(saved.answers);ui.scenario=Number.isInteger(saved.position?.[0])?Math.max(0,Math.min(SOURCE.length-1,saved.position[0])):0;ui.history=saved.position?.[1]===1?1:0;ui.condition=Number.isInteger(saved.position?.[2])?Math.max(0,Math.min(3,saved.position[2])):0"
-    if app.count(old_local_restore) != 1:
-        raise WorkspaceBuildError("owner HTML local draft recovery differs from the approved version")
-    app = app.replace(old_local_restore, new_local_restore, 1)
-    app = app.replace("async function bindSource()", "function bindSource()", 1)
-    if "async function bindSource()" in app:
-        raise WorkspaceBuildError("could not make embedded source binding synchronous")
-
-    rationale_button = re.compile(r'<button type="button" class="mini-btn" data-copy-rationale="[^"]+">Copy earlier rationale for this history \(review before using\)</button>')
-    app, removed_rationales = rationale_button.subn("", app)
-    if removed_rationales != 2:
-        raise WorkspaceBuildError("owner HTML must contain the two cross-variant rationale copy controls")
-    all_pass_button = re.compile(r'<button type="button" class="mini-btn" data-all-pass="1">✓ Mark all eight checks as passing</button>')
-    app, removed_bulk_pass = all_pass_button.subn("", app)
-    if removed_bulk_pass != 1:
-        raise WorkspaceBuildError("owner HTML must contain exactly one all-checks shortcut")
-    app = app.replace("If every check is satisfactory after inspecting, use the shortcut below.", "Answer every checklist item independently for this variant.", 1)
-    if "If every check is satisfactory after inspecting, use the shortcut below." in app:
-        raise WorkspaceBuildError("review checklist shortcut text was not removed")
-
-    click_handler = re.compile(r"\$\('assessment-fields'\)\.addEventListener\('click'.*?(?=\n\$\('save-next'\)\.addEventListener)", re.DOTALL)
-    app, click_count = click_handler.subn("", app)
-    if click_count != 1:
-        raise WorkspaceBuildError("owner HTML click-handler block differs from the approved version")
-
-    for loader_pattern in (
-        re.compile(r"async function handleTemplate\(.*?(?=\nasync function handlePackets\()", re.DOTALL),
-        re.compile(r"async function handlePackets\(.*?(?=\nfunction exportComplete\()", re.DOTALL),
-    ):
-        if loader_pattern.search(app):
-            app, loader_count = loader_pattern.subn("", app)
-            if loader_count != 1:
-                raise WorkspaceBuildError("owner HTML external source-loader function differs from the approved version")
-
-    # Each app handler lives on a single line in the supplied, versioned UI shell.
-    lines = app.splitlines()
-    lines = [
-        line for line in lines
-        if not line.startswith("$('template-file').addEventListener(")
-        and not line.startswith("$('packet-folder').addEventListener(")
+    matches = [
+        match for match in _SCRIPT.finditer(html)
+        if (id_match := _ATTR_ID.search(match.group("attrs")))
+        and id_match.group(2) == "p2c-review-app"
+        or "const SOURCE = JSON.parse(document.getElementById('embedded-scenarios').textContent);" in match.group("body")
     ]
-    app = "\n".join(lines)
-    init_old = "}catch(_){}renderAll()})();"
-    if app.count(init_old) != 1:
-        raise WorkspaceBuildError("owner HTML startup sequence differs from the approved transformation anchor")
-    app = app.replace(init_old, "}catch(_){}try{bindSource()}catch(e){bindingFailure(e)}renderAll()})();", 1)
-    app = app.replace(
-        "Select your 448-row template and 56 source packets first.",
-        "The embedded 448-row template and 56 source packets failed binding.",
-        1,
-    )
-    app = app.replace(
-        "You can now export the final JSONL once the source package is linked.",
-        "You can now export the final JSONL.",
-        1,
-    )
-    export_binding = "if(!src||used.has(b.example_id))throw Error('Binding mismatch during export.');"
-    if app.count(export_binding) != 1:
-        raise WorkspaceBuildError("owner HTML export hash validation differs from the approved version")
-    app = app.replace(
-        export_binding,
-        "if(!src||used.has(b.example_id)||src.example_sha256!==b.example_sha256||src.canonical_scenario_sha256!==b.canonical_scenario_sha256)throw Error('Binding or source hash mismatch during export.');",
-        1,
-    )
-    app = app.replace(
-        "✓ Verified: 56 packets + 448 template rows · hashes aligned",
-        "Source package verified: 56 scenarios · 448 variants · hashes aligned",
-        1,
-    )
-    old_permission_fragment = "const tool=sc.tool,pars=tool.action?.parameters||{};"
-    new_permission_fragment = "const tool=sc.tool,pars=tool.action?.parameters||{},schemaText=(tool.parameters||[]).map(p=>`${p.name}: ${p.type}${p.required?' (required)':' (optional)'}`).join('; '),permText=(tool.required_permission_details||[]).map(p=>`${p.permission}${p.scope?.entity_id?` · scope ${p.scope.entity_id}`:''}`).join(', ');"
-    if app.count(old_permission_fragment) != 1:
-        raise WorkspaceBuildError("owner HTML action renderer differs from the approved transformation anchor")
-    app = app.replace(old_permission_fragment, new_permission_fragment, 1)
-    old_permission_render = "tool.required_permissions?.length?'Requires permission: '+escapeHtml(tool.required_permissions.join(', ')):''"
-    if app.count(old_permission_render) != 1:
-        raise WorkspaceBuildError("owner HTML permission renderer differs from the approved transformation anchor")
-    app = app.replace(
-        old_permission_render,
-        "(schemaText?'Tool contract: '+escapeHtml(schemaText)+'. ':'')+(permText?'Requires permission: '+escapeHtml(permText):'')",
-        1,
-    )
-    if "data-copy-rationale" in app or "data-all-pass" in app or "template-file" in app or "packet-folder" in app:
-        remaining = {token: app.count(token) for token in ("data-copy-rationale", "data-all-pass", "template-file", "packet-folder") if token in app}
-        raise WorkspaceBuildError(f"a removed reviewer shortcut or external-file dependency remains in the app script: {remaining}")
-    return html[:match.start("body")] + app + html[match.end("body"):]
+    if len(matches) != 1:
+        raise WorkspaceBuildError("owner HTML must contain exactly one replaceable reviewer application script")
+    match = matches[0]
+    try:
+        logic = REVIEW_LOGIC_JS.read_text(encoding="utf-8")
+        app = REVIEW_APP_JS.read_text(encoding="utf-8")
+    except OSError as exc:
+        raise WorkspaceBuildError("versioned reviewer JavaScript source is missing") from exc
+    if "window.createP2CReviewLogic" not in logic or "p2c-review-draft-3" not in logic:
+        raise WorkspaceBuildError("review logic source does not expose the expected checkpoint contract")
+    if "const REVIEW_DATA = JSON.parse" not in app or "logic.restoreCheckpoint" not in app:
+        raise WorkspaceBuildError("review app must bind the embedded package and delegate checkpoint validation")
 
+    replacement = f'<script id="p2c-review-app">\n{app}\n</script>'
+    html = html[:match.start()] + replacement + html[match.end():]
+    app_start = html.index('<script id="p2c-review-app">')
+    logic_script = f'<script id="p2c-review-logic">\n{logic}\n</script>\n'
+    return html[:app_start] + logic_script + html[app_start:]
 
 def _rewrite_static_markup(html: str, reviewer_slot: str) -> str:
+    """Update visible instructions and add compact styling for structured evidence."""
     reviewer_number = reviewer_slot.rsplit("_", 1)[-1]
-    html = html.replace("<title>Bilingual review workspace · Reviewer 2</title>", f"<title>Bilingual review workspace · Reviewer {reviewer_number}</title>", 1)
-    html = html.replace("Reviewer slot 2 · English + Modern Standard Arabic", f"Reviewer slot {reviewer_number} · English + Modern Standard Arabic", 1)
-    if html.count("<title>Bilingual review workspace · Reviewer ") != 1:
+    html, title_count = re.subn(
+        r"<title>Bilingual review workspace · Reviewer [12]</title>",
+        f"<title>Bilingual review workspace · Reviewer {reviewer_number}</title>",
+        html,
+        count=1,
+    )
+    if title_count != 1:
         raise WorkspaceBuildError("owner HTML title is not recognized")
+    html = re.sub(
+        r"Reviewer slot [12] · English \+ Modern Standard Arabic",
+        f"Reviewer slot {reviewer_number} · English + Modern Standard Arabic",
+        html,
+        count=1,
+    )
 
-    setup_intro = re.compile(
+    old_panel = re.compile(
         r'<p>For a final, ingestion-compatible JSONL export, attach your original 448-row annotation template and the 56 reviewer packet JSON files\. You can review first and attach them later\.</p>\s*'
         r'<label>1 · Select <code>annotation-template\.jsonl</code><input type="file" accept="\.jsonl" id="template-file"\s*/?></label>\s*'
         r'<label>2 · Select reviewer packet folder \(56 JSON files\)<input type="file" accept="\.json" id="packet-folder" webkitdirectory multiple\s*/?></label>\s*'
         r'<div class="setup-state" id="binding-state">Not linked to source hashes</div>',
         re.DOTALL,
     )
-    html, count = setup_intro.subn(
+    html, old_count = old_panel.subn(
         '<p>Your assigned 56 source packets and blank 448-row annotation template are embedded in this page. No additional files are needed. Save a checkpoint JSON to continue in a later session.</p>\n'
         '<div class="setup-state" id="binding-state">Checking embedded source package…</div>',
         html,
+        count=1,
     )
-    if count != 1:
-        raise WorkspaceBuildError("owner HTML source-package panel differs from the approved transformation anchor")
+    if old_count == 0 and 'id="binding-state"' not in html:
+        raise WorkspaceBuildError("owner HTML is missing its source-package status panel")
     html = html.replace("<h3>Export setup</h3>", "<h3>Source package and export</h3>", 1)
-    html = html.replace("Be independent.", "Be independent.", 1)
     html = html.replace(
         "When all 448 are complete, attach the original template and packet folder to export a verified JSONL file for the researcher.",
-        "When all 448 are complete, export the verified JSONL file directly from this page. The export contains only your own answers.",
+        "When all 448 variants are complete, export the verified JSONL directly from this page. The export contains only your answers.",
+        1,
+    )
+    html = html.replace(
+        "Save a checkpoint JSON periodically. When all 448 are complete, export the verified JSONL file directly from this page. The export contains only your own answers.",
+        "Save a checkpoint JSON periodically. When all 448 variants are complete, export the verified JSONL file directly from this page. The export contains only your own answers.",
         1,
     )
     html = html.replace(
         "You can mark all eight as passing after inspection, or flag individual problems.",
-        "Answer each of the eight checklist items separately for every variant, or flag individual problems.",
+        "Answer all eight checklist items independently. Clean variants need no notes; flagged problems require structured evidence.",
         1,
     )
-    guide_text = "Each must receive its own assessment."
-    if guide_text in html:
-        html = html.replace(guide_text, guide_text + " Answers and rationales are never copied to another variant.", 1)
+    html = html.replace(
+        "Answer each of the eight checklist items separately for every variant, or flag individual problems. Add notes when anything is wrong or uncertain.",
+        "Answer all eight checklist items separately for every variant. Clean variants need no notes; flagged problems require specific structured evidence and the page generates the notes field.",
+        1,
+    )
+    html = html.replace(
+        "Each must receive its own assessment. Answers and rationales are never copied to another variant.",
+        "Each must receive its own assessment. Answers, reasons, and rationales are never copied to another variant.",
+        1,
+    )
+    marker = "Be independent."
+    html = html.replace(PREVIOUS_COMPATIBILITY_COPY, COMPATIBILITY_COPY)
+    if marker in html and COMPATIBILITY_COPY not in html:
+        html = html.replace(marker, marker + " " + COMPATIBILITY_COPY, 1)
+
+    if "/* Structured annotation controls */" not in html:
+        if "</style>" in html:
+            html = html.replace("</style>", STRUCTURED_REVIEW_CSS + "</style>", 1)
+        else:
+            html = html.replace("</head>", f"<style>{STRUCTURED_REVIEW_CSS}</style></head>", 1)
+    return html
+
+def _clear_embedded_package_data(html: str) -> str:
+    """Remove prior private payloads before binding the current reviewer package."""
+    scenarios = []
+    for match in _SCRIPT.finditer(html):
+        id_match = _ATTR_ID.search(match.group("attrs"))
+        if id_match and id_match.group(2) == "embedded-scenarios":
+            scenarios.append(match)
+    if len(scenarios) != 1:
+        raise WorkspaceBuildError("owner HTML must contain exactly one embedded scenario data script")
+
+    for match in reversed(list(_SCRIPT.finditer(html))):
+        id_match = _ATTR_ID.search(match.group("attrs"))
+        if not id_match:
+            continue
+        script_id = id_match.group(2)
+        if script_id == "embedded-review-data":
+            html = html[:match.start()] + html[match.end():]
+        elif script_id == "embedded-scenarios":
+            html = html[:match.start("body")] + "[]" + html[match.end("body"):]
     return html
 
 
@@ -573,9 +669,18 @@ def build_workspace_html(
     package_manifest_sha256: str,
     packet_sha256: Mapping[str, str] | None = None,
     template_sha256: str | None = None,
+    legacy_source_fingerprints: Sequence[str] = (),
 ) -> str:
     """Build one self-contained, independently assigned HTML review page."""
     packet_map, template_map, bindings = _validate_packet_and_template(reviewer_slot, packets, template_rows)
+    network_apis = r"(?:fetch\s*\(|XMLHttpRequest|WebSocket|EventSource|sendBeacon\s*\(|importScripts\s*\()"
+    if re.search(network_apis, source_html, re.IGNORECASE):
+        raise WorkspaceBuildError("reviewer HTML shell must not contain network communication")
+    remote_assets = r"(?:<(?:script|link|img|iframe|source)\b[^>]*\b(?:src|href)\s*=\s*['\"]\s*https?://|@import\s+(?:url\()?\s*['\"]?https?://|url\(\s*['\"]?https?://)"
+    if re.search(remote_assets, source_html, re.IGNORECASE):
+        raise WorkspaceBuildError("reviewer HTML shell must not depend on remote scripts or assets")
+
+    source_html = _clear_embedded_package_data(source_html)
     fingerprint = source_fingerprint(
         source_html,
         reviewer_slot,
@@ -585,20 +690,18 @@ def build_workspace_html(
         packet_sha256=packet_sha256,
         template_sha256=template_sha256,
     )
-    network_apis = r"(?:fetch\s*\(|XMLHttpRequest|WebSocket|EventSource|sendBeacon\s*\(|importScripts\s*\()"
-    if re.search(network_apis, source_html, re.IGNORECASE):
-        raise WorkspaceBuildError("reviewer HTML shell must not contain network communication")
-    remote_assets = r"(?:<(?:script|link|img|iframe|source)\b[^>]*\b(?:src|href)\s*=\s*['\"]\s*https?://|@import\s+(?:url\()?\s*['\"]?https?://|url\(\s*['\"]?https?://)"
-    if re.search(remote_assets, source_html, re.IGNORECASE):
-        raise WorkspaceBuildError("reviewer HTML shell must not depend on remote scripts or assets")
+    if any(not _valid_hash(value) for value in legacy_source_fingerprints) or len(set(legacy_source_fingerprints)) != len(legacy_source_fingerprints):
+        raise WorkspaceBuildError("legacy checkpoint fingerprints must be unique SHA-256 digests")
 
     scenarios = _source_scenarios(packet_map)
     review_data = {
-        "format": "p2c-embedded-review-package-1",
+        "format": "p2c-embedded-review-package-2",
         "workspace_version": WORKSPACE_VERSION,
         "reviewer_slot": reviewer_slot,
         "source_fingerprint": fingerprint,
         "package_manifest_sha256": package_manifest_sha256,
+        "reason_taxonomy": reason_taxonomy_data(),
+        "legacy_source_fingerprints": list(legacy_source_fingerprints),
         "bindings": {key: bindings[key] for key in sorted(bindings)},
         "template": [template_map[key] for key in sorted(template_map)],
         "packets": [packet_map[key] for key in sorted(packet_map)],
@@ -721,6 +824,10 @@ def generate_workspaces(studio_html_path: Path, package_root: Path) -> dict[str,
         template_raw = template_path.read_bytes()
         verify_manifest_file(template_path, template_raw)
         template_rows = _read_jsonl_file(template_path, f"{slot} annotation template")
+        _packet_map, _template_map, current_bindings = _validate_packet_and_template(slot, packets, template_rows)
+        output_path = review_root / slot / "bilingual-review-studio.html"
+        prior_html = output_path.read_text(encoding="utf-8") if output_path.is_file() else ""
+        legacy_fingerprints = legacy_source_fingerprints_from_workspace(prior_html, slot, current_bindings)
         html = build_workspace_html(
             source_html,
             slot,
@@ -729,8 +836,8 @@ def generate_workspaces(studio_html_path: Path, package_root: Path) -> dict[str,
             package_manifest_sha256=package_sha,
             packet_sha256=packet_hashes,
             template_sha256=_sha256(template_raw),
+            legacy_source_fingerprints=legacy_fingerprints,
         )
-        output_path = review_root / slot / "bilingual-review-studio.html"
         _atomic_private_write(output_path, html)
         results[slot] = {
             "path": str(output_path),

@@ -99,6 +99,43 @@ _VALUE_PAIR_TYPES = {
 }
 _EXPLANATION_TYPES = {"semantic_ambiguity", "linguistic_defect", "other"}
 _GENERIC_EXPLANATIONS = {"wrong", "unclear", "problem", "issue", "other", "not covered", "bad"}
+EXISTING_ISSUE_CODES = (
+    "incorrect_number",
+    "incorrect_time",
+    "incorrect_unit",
+    "incorrect_permission",
+    "incorrect_technical_literal",
+    "missing_decision_relevant_information",
+    "incorrect_conversational_chronology",
+)
+
+
+def reason_taxonomy_data() -> dict[str, object]:
+    """Return the versioned data consumed by the generated offline JavaScript."""
+    allowed = {
+        "q3": {
+            "yes": list(_ALLOWED[("q3", "yes")]),
+            "no": list(_ALLOWED[("q3", "no")]),
+            "unclear": list(_ALLOWED[("q3", "unclear")]),
+        },
+        "q4": {
+            "yes": list(_ALLOWED[("q4", "yes")]),
+            "no": list(_ALLOWED[("q4", "no")]),
+            "unclear": list(_ALLOWED[("q4", "unclear")]),
+        },
+    }
+    return {
+        "version": REASON_TAXONOMY_VERSION,
+        "allowed": allowed,
+        "q3": allowed["q3"],
+        "q4": allowed["q4"],
+        "q3_labels": Q3_REASONS,
+        "q4_labels": Q4_REASONS,
+        "issue_types": ISSUE_TYPES,
+        "issue_codes": list(EXISTING_ISSUE_CODES),
+        "value_pair_types": sorted(_VALUE_PAIR_TYPES),
+        "explanation_types": sorted(_EXPLANATION_TYPES),
+    }
 
 
 def allowed_reasons(question: str, answer: str) -> tuple[str, ...]:
@@ -145,10 +182,12 @@ def build_rationale(question: str, answer: str, selection: Mapping[str, object])
         raise ValueError("supporting turns must be unique")
     if not turns:
         raise ValueError("at least one supporting turn is required")
-    if any(reason.startswith("multiple_") for reason in reasons) and len(turns) < 2:
+    if question == "q3" and "multiple_earlier_turns_needed" in reasons and len(turns) < 2:
         raise ValueError("multiple-turn reasons require at least two distinct supporting turns")
 
     fields = _selection_list(selection["fields"], "requirement/field", allow_empty=True)
+    if question == "q4" and "multiple_earlier_requirements_needed" in reasons and len(fields) < 2:
+        raise ValueError("multiple earlier requirements need at least two selected requirement/field values")
     explanations = ""
     if any(reason == "other" or reason.startswith("ambiguous_or_conflicting") for reason in reasons):
         explanations = _specific_explanation(selection["explanation"], "Other or ambiguous reasons")
@@ -177,7 +216,7 @@ def build_issue_notes(reports: Sequence[Mapping[str, object]]) -> str:
     rendered: list[str] = []
     required = {"type", "turn_index", "field", "expected", "observed", "explanation"}
     for report in reports:
-        if not isinstance(report, Mapping) or set(report) != required:
+        if not isinstance(report, Mapping) or set(report) not in (required, required | {"explanation_required"}):
             raise ValueError("each issue report must include type, turn_index, field, expected, observed, and explanation")
         kind = report["type"]
         if kind not in ISSUE_TYPES:
@@ -194,12 +233,17 @@ def build_issue_notes(reports: Sequence[Mapping[str, object]]) -> str:
         explanation = report["explanation"]
         if not isinstance(expected, str) or not isinstance(observed, str) or not isinstance(explanation, str):
             raise ValueError("issue evidence fields must be text")
+        explanation_required = report.get("explanation_required", False)
+        if not isinstance(explanation_required, bool):
+            raise ValueError("additional-explanation choice must be yes or no")
 
         details = f"{ISSUE_TYPES[kind]} (turn {turn}; field {json.dumps(field, ensure_ascii=False)})"
         if kind in _VALUE_PAIR_TYPES:
             if not expected.strip() or not observed.strip():
                 raise ValueError("this issue type requires expected and observed values")
             details += f": expected {json.dumps(expected.strip(), ensure_ascii=False)}; observed {json.dumps(observed.strip(), ensure_ascii=False)}."
+            if explanation_required or explanation.strip():
+                details += " Additional explanation: " + _specific_explanation(explanation, ISSUE_TYPES[kind]) + "."
         elif kind in _EXPLANATION_TYPES:
             details += ": " + _specific_explanation(explanation, ISSUE_TYPES[kind])
         else:
