@@ -128,7 +128,11 @@ def load_frozen_inputs(freeze_root: str | Path, *, partition: str = "locked") ->
     except (OSError, IndexError, UnicodeDecodeError) as exc:
         raise FrozenExecutionError("freeze manifest checksum sidecar is unavailable") from exc
     manifest_sha = hashlib.sha256(manifest_path.read_bytes()).hexdigest()
-    if sidecar != manifest_sha or manifest.get("status") != "frozen" or manifest.get("manifest_version") != "p2c-full-study-freeze-1":
+    if (
+        sidecar != manifest_sha
+        or manifest.get("status") != "frozen"
+        or manifest.get("manifest_version") not in {"p2c-full-study-freeze-1", "p2c-full-study-freeze-2"}
+    ):
         raise FrozenExecutionError("input package is not a valid immutable freeze")
     prefix = f"{partition}/"
     file_hashes = manifest.get("files")

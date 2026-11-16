@@ -390,6 +390,10 @@ def test_freeze_creates_separate_opaque_inference_and_reference_artifacts(tmp_pa
     inference = [json.loads(line) for line in (root / "locked" / "inference-items.jsonl").read_text().splitlines()]
     reference = json.loads((root / "reference" / "locked-reference-key.json").read_text())
     configs = json.loads((root / "execution" / "run-configs.json").read_text())
+    freeze_manifest = json.loads((root / "freeze-manifest.json").read_text())
+    state_access_plan_path = root / "diagnostics" / "state-access" / "plan.json"
+    state_access_plan = json.loads(state_access_plan_path.read_text())
+    state_projection = [json.loads(line) for line in (root / "diagnostics" / "state-access" / "locked-state-projection.jsonl").read_text().splitlines()]
     assert len(inference) == 8
     assert len(reference) == 8
     assert set(row["item_id"] for row in inference) == set(reference)
@@ -397,7 +401,36 @@ def test_freeze_creates_separate_opaque_inference_and_reference_artifacts(tmp_pa
     assert all("reference_verdict" not in row and "effective_state" not in row for row in inference)
     assert {row["language"] for item in inference for row in item["conversation"]} <= {"en", "ar"}
     assert set(configs["configurations"]) == {"direct", "translation_first", "structured"}
+    assert freeze_manifest["manifest_version"] == "p2c-full-study-freeze-2"
+    assert "diagnostics/state-access/plan.json" in freeze_manifest["files"]
+    assert "diagnostics/state-access/locked-state-projection.jsonl" in freeze_manifest["files"]
+    assert state_access_plan["planned_item_count"] == 8
+    assert state_access_plan["planned_request_count"] == 16
+    assert state_access_plan["input_manifest_sha256"] == frozen["locked_input_manifest_sha256"]
+    assert len(state_projection) == 8
+    assert all("reference_verdict" not in row and "judge_prediction" not in row for row in state_projection)
+    assert len(list((root / "diagnostics" / "state-access" / "requests" / "withheld").glob("*.json"))) == 8
+    assert len(list((root / "diagnostics" / "state-access" / "requests" / "supplied").glob("*.json"))) == 8
     assert frozen["reference_files_separated_from_inference"] is True
+
+
+def test_ordinary_inference_loader_accepts_existing_freeze_manifest_version_one(tmp_path: Path):
+    freeze_root = _create_synthetic_freeze(tmp_path)
+    manifest_path = freeze_root / "freeze-manifest.json"
+    manifest = json.loads(manifest_path.read_text())
+    manifest["manifest_version"] = "p2c-full-study-freeze-1"
+    raw = (json.dumps(manifest, ensure_ascii=False, sort_keys=True, indent=2) + "\n").encode()
+    manifest_path.chmod(0o600)
+    manifest_path.write_bytes(raw)
+    manifest_path.chmod(0o444)
+    sidecar_path = freeze_root / "freeze-manifest.sha256"
+    sidecar_path.chmod(0o600)
+    sidecar_path.write_text(hashlib.sha256(raw).hexdigest() + "  freeze-manifest.json\n")
+
+    rows, _input_manifest, loaded = load_frozen_inputs(freeze_root)
+
+    assert len(rows) == 8
+    assert loaded["manifest_version"] == "p2c-full-study-freeze-1"
 
 
 def test_freeze_fails_closed_when_reviewer_export_is_missing(tmp_path: Path):

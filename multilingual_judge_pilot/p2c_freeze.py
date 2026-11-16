@@ -42,6 +42,7 @@ from .serialization import (
 )
 from .judge_inference import canonical_json
 from .p2c_study_config import build_study_configs
+from .paper2_state_access import build_locked_state_access_artifacts
 
 
 FULL_STUDY_INVENTORY = {
@@ -56,7 +57,7 @@ FULL_STUDY_INVENTORY = {
     "locked_control_items": 96,
     "locked_items": 384,
 }
-FREEZE_MANIFEST_VERSION = "p2c-full-study-freeze-1"
+FREEZE_MANIFEST_VERSION = "p2c-full-study-freeze-2"
 INPUT_MANIFEST_VERSION = "p2c-locked-input-manifest-1"
 DEVELOPMENT_MANIFEST_VERSION = "p2c-development-input-manifest-1"
 
@@ -621,6 +622,17 @@ def create_freeze(
     files["reference/adjudications.jsonl"] = hashlib.sha256(
         _atomic_bytes(freeze_root / "reference" / "adjudications.jsonl", raw_adjudications, mode=0o600)
     ).hexdigest()
+    state_access_artifacts = build_locked_state_access_artifacts(
+        locked_rows,
+        {item_id: refs[item_id] for item_id in sorted(locked_ids)},
+        {item_id: metadata[item_id] for item_id in sorted(locked_ids)},
+        input_manifest_sha256=locked_manifest["manifest_sha256"],
+        order_seed_hex=seed_hex,
+    )
+    for relative_path, raw in sorted(state_access_artifacts.items()):
+        files[relative_path] = hashlib.sha256(
+            _atomic_bytes(freeze_root / relative_path, raw, mode=0o600)
+        ).hexdigest()
     manifest = {
         "manifest_version": FREEZE_MANIFEST_VERSION,
         "freeze_id": freeze_id,
@@ -639,6 +651,7 @@ def create_freeze(
         "development_input_manifest_sha256": development_manifest["manifest_sha256"],
         "files": files,
         "reference_files_separated_from_inference": True,
+        "state_access_diagnostic_separately_frozen": True,
     }
     manifest_sha256 = _write_json(freeze_root / "freeze-manifest.json", manifest)
     _atomic_bytes(freeze_root / "freeze-manifest.sha256", (manifest_sha256 + "  freeze-manifest.json\n").encode("ascii"))

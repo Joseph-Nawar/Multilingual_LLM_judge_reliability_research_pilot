@@ -18,38 +18,31 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from multilingual_judge_pilot.judge_inference import (
-    BINARY_RESPONSE_CONTRACT, canonical_json, parse_verdict_response, response_schema,
+    canonical_json, parse_verdict_response,
 )
 from multilingual_judge_pilot.local_ollama import OllamaLocalClient, OllamaLocalError
+from multilingual_judge_pilot.paper2_state_access import (
+    ALLOWED_CONSTRAINT_FIELDS,
+    ALLOWED_PERMISSION_FIELDS,
+    ALLOWED_STATE_FIELDS,
+    INSTRUCTION,
+    MODEL,
+    OPTIONS,
+    ORDER_SEED,
+    SCHEMA,
+    VERSION,
+    cluster_interval,
+    digest,
+    evidence,
+    safe_state,
+    quantile,
+)
 from multilingual_judge_pilot.qualification import QUALIFICATION_MODEL_DIGESTS
 
 
 SOURCE = ROOT / ".research-data/p3-four-language-feasibility-20261111"
 PRIOR_STATE = ROOT / ".research-data/p3-h2-development-diagnostic-20261112/reference/item-map-and-effective-states.json"
 OUT = ROOT / ".research-data/paper2-state-information-v2-20261115"
-MODEL = "gemma4:12b-it-qat"
-VERSION = "paper2-h2-shared-state-information-v2-20261115"
-ORDER_SEED = 20261115
-INSTRUCTION = (
-    "Judge whether the proposed action is valid using only the conversation, proposed action, "
-    "public tool contract, and effective_state in this request. First check public tool-contract "
-    "conformance, including tool name, fields, types, and allowed values. Check conversational "
-    "authorization separately; user permission cannot change the tool contract. If effective_state "
-    "is null, reconstruct the active user requirements and permissions from the conversation: "
-    "later revisions replace only what they change, restatements preserve requirements, and "
-    "revocations remove the permissions they revoke. If effective_state is an object, use its "
-    "active constraints and permissions as the current state while checking the action and public "
-    "tool contract. An effective_state object does not state action validity. A valid action must "
-    "satisfy the tool contract and all applicable active requirements. Return only one JSON object "
-    "matching the supplied binary response schema, with no explanation or extra keys."
-)
-SCHEMA = response_schema(BINARY_RESPONSE_CONTRACT)
-OPTIONS = {"num_ctx": 4096, "num_predict": 96, "seed": 17, "temperature": 0.0}
-ALLOWED_STATE_FIELDS = {"active_constraints", "active_permissions"}
-ALLOWED_CONSTRAINT_FIELDS = {"constraint_type", "field", "scope_entity", "lower_bound", "upper_bound", "currency_code"}
-ALLOWED_PERMISSION_FIELDS = {"permission", "scope_entity"}
-
-
 def read(path: Path) -> dict:
     return json.loads(path.read_text(encoding="utf-8"))
 
@@ -59,37 +52,6 @@ def write_once(path: Path, value: dict) -> None:
     with path.open("x", encoding="utf-8") as handle:
         json.dump(value, handle, ensure_ascii=False, sort_keys=True, indent=2)
         handle.write("\n")
-
-
-def digest(value: object) -> str:
-    return sha256(canonical_json(value).encode("utf-8")).hexdigest()
-
-
-def safe_state(state: object) -> bool:
-    if not isinstance(state, dict) or set(state) != ALLOWED_STATE_FIELDS:
-        return False
-    constraints, permissions = state["active_constraints"], state["active_permissions"]
-    if not isinstance(constraints, list) or not isinstance(permissions, list):
-        return False
-    if any(not isinstance(row, dict) or set(row) != ALLOWED_CONSTRAINT_FIELDS for row in constraints):
-        return False
-    if any(not isinstance(row, dict) or set(row) != ALLOWED_PERMISSION_FIELDS for row in permissions):
-        return False
-    return all(
-        value is None or isinstance(value, dict) and set(value) == {"value", "inclusive"}
-        for row in constraints for value in (row["lower_bound"], row["upper_bound"])
-    )
-
-
-def evidence(row: dict, state: dict | None) -> dict:
-    """The only arm difference is the value of effective_state."""
-    return {
-        "item_id": row["item_id"],
-        "conversation": [{key: turn[key] for key in ("turn_index", "speaker", "content")} for turn in row["conversation"]],
-        "action": row["action"],
-        "public_tool_schema": row["public_tool_schema"],
-        "effective_state": state,
-    }
 
 
 def prepare() -> None:
@@ -167,24 +129,6 @@ def run() -> None:
             "status": status, "error": error, "raw_error_response": raw_error, "raw_response": response,
         })
         print(canonical_json({"completed": index, "total": 128, "arm": arm, "status": status}), flush=True)
-
-
-def quantile(values: list[float], p: float) -> float:
-    ordered = sorted(values)
-    return ordered[int((len(ordered) - 1) * p)]
-
-
-def cluster_interval(rows: list[dict], field: str, *, seed: int = 17) -> tuple[float, float]:
-    clusters = defaultdict(list)
-    for row in rows:
-        clusters[row["scenario_id"]].append(row[field])
-    ids = sorted(clusters)
-    rng = random.Random(seed)
-    values = []
-    for _ in range(10000):
-        sample = [value for _ in ids for value in clusters[rng.choice(ids)]]
-        values.append(sum(sample) / len(sample))
-    return round(quantile(values, .025), 3), round(quantile(values, .975), 3)
 
 
 def score() -> None:
