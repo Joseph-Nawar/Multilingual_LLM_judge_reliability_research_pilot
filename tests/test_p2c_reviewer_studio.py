@@ -223,6 +223,13 @@ def test_workspace_fingerprint_is_stable_when_regenerated_from_current_workspace
 
     assert second_data["source_fingerprint"] == first_data["source_fingerprint"]
 
+    regenerated = build_workspace_html(
+        first, "reviewer_slot_2", packets, template,
+        package_manifest_sha256="c" * 64,
+        legacy_source_fingerprints=[first_data["source_fingerprint"]],
+    )
+    assert _sha(regenerated) == _sha(first)
+
 
 def test_workspace_rejects_a_packet_from_another_reviewer_slot():
     packets, template = _synthetic_package("reviewer_slot_2")
@@ -489,6 +496,15 @@ def test_rationale_rejects_missing_incompatible_duplicate_and_unsupported_eviden
             "fields": ["permission state"],
             "explanation": "",
         })
+    assert "earlier supporting turn" in _run_js_logic("buildRationale", "q3", "no", {
+        "reasons": ["earlier_numeric_needed"], "supporting_turns": [4], "fields": ["amount"], "explanation": "",
+    }, [2, 4], 4)["error"]
+    assert "two earlier turns" in _run_js_logic("buildRationale", "q3", "no", {
+        "reasons": ["multiple_earlier_turns_needed"], "supporting_turns": [2, 4], "fields": [], "explanation": "",
+    }, [2, 4], 4)["error"]
+    assert "earlier supporting turn" in _run_js_logic("buildRationale", "q4", "no", {
+        "reasons": ["earlier_permission_information_needed"], "supporting_turns": [4], "fields": ["permission state"], "explanation": "",
+    }, [2, 4], 4)["error"]
     with pytest.raises(ValueError, match="explanation"):
         build_rationale("q3", "unclear", {
             "reasons": ["ambiguous_or_conflicting"],
@@ -534,6 +550,10 @@ def test_structured_issue_notes_reject_generic_or_incomplete_problem_explanation
         build_issue_notes([{"type": "incorrect_time", "field": "start time", "expected": "09:00", "observed": "10:00", "explanation": ""}])
     with pytest.raises(ValueError, match="expected and observed"):
         build_issue_notes([{"type": "incorrect_number", "turn_index": 2, "field": "amount", "expected": "", "observed": "90", "explanation": ""}])
+    with pytest.raises(ValueError, match="generic placeholder"):
+        build_issue_notes([{"type": "incorrect_number", "turn_index": 2, "field": "problem", "expected": "$80", "observed": "$90", "explanation": ""}])
+    with pytest.raises(ValueError, match="generic placeholder"):
+        build_issue_notes([{"type": "incorrect_number", "turn_index": 2, "field": "amount", "expected": "wrong", "observed": "$90", "explanation": ""}])
     with pytest.raises(ValueError, match="specific explanation"):
         build_issue_notes([{"type": "other", "turn_index": 2, "field": "scope", "expected": "", "observed": "", "explanation": "Wrong."}])
 
@@ -586,6 +606,11 @@ def test_javascript_issue_notes_require_adequate_evidence_for_every_issue_type()
             assert "expected" in rendered and "observed" in rendered
         else:
             assert "The wording changes" in rendered
+    generic_field = _run_js_logic("buildIssueNotes", [{
+        "type": "incorrect_number", "turn_index": 4, "field": "problem", "expected": "$80",
+        "observed": "$90", "explanation": "", "explanation_required": False,
+    }])
+    assert "generic placeholder" in generic_field["error"]
 
 
 def test_workspace_embeds_the_versioned_taxonomy_and_replaces_free_text_rationale_fields():
@@ -609,6 +634,12 @@ def test_workspace_embeds_the_versioned_taxonomy_and_replaces_free_text_rational
     assert 'data-field="decisive_update_dependence_rationale"' not in html
     assert 'data-field="whole_action_dependence_rationale"' not in html
     assert 'data-field="notes"' not in html
+    assert "const answerField=question==='q3'?'decisive_update_dependence':'whole_action_dependence'" in html
+    assert "answerChoices(answerField,[['yes','Yes'],['no','No'],['unclear','Unclear']])" in html
+    assert 'id="choice-${field}-${value}"' in html
+    assert 'id="check-${key}-no"' in html
+    assert "Unclear means the distinction cannot be established reliably" in html
+    assert "needsPair&&record.explanation_required" in html
     assert "Copy earlier rationale" not in html
     assert "Mark all eight checks as passing" not in html
 
@@ -676,6 +707,8 @@ def test_javascript_answer_validation_rejects_incomplete_reasons_and_issue_evide
     }
     with_issue = {**complete, "issue_codes": ["incorrect_number"], "issue_reports": {"issue_code:incorrect_number": [number_report]}}
     assert _run_js_logic("problems", with_issue, keys) == []
+    assert _run_js_logic("problems", with_issue, keys, {}, [1, 3, 4], 3) == []
+    assert any("issue report" in problem.lower() for problem in _run_js_logic("problems", with_issue, keys, {}, [1, 3], 3))
     assert _run_js_logic("buildIssueNotes", [number_report]) == 'Incorrect number (turn 4; field "maximum amount"): expected "$80"; observed "$90".'
     detailed_number = {
         **number_report,
@@ -709,6 +742,50 @@ def test_javascript_answer_validation_rejects_incomplete_reasons_and_issue_evide
         "explanation": other_field_report["explanation"],
         "explanation_required": other_field_report["explanation_required"],
     }])
+
+    failed_checklist = {
+        **complete,
+        "checklist": {**complete["checklist"], "matches_formal_spec": False},
+        "issue_reports": {"checklist:matches_formal_spec": [{
+            "turn_index": 4,
+            "field": "Numeric requirement: deposit amount",
+            "field_other": "",
+            "expected": "$80",
+            "observed": "$90",
+            "explanation": "",
+            "explanation_required": False,
+        }]},
+    }
+    labels = {
+        "matches_formal_spec": "Matches the intended formal specification",
+        "preserves_cross_language_meaning": "Same intended meaning across languages",
+        "initial_requirements_communicated": "Initial requirements and permissions are stated",
+        "decisive_turn_expresses_event": "Final update expresses the intended change",
+        "counterfactual_differences_controlled": "H1/H2 differ only as intended",
+        "action_interpretation_preserved": "Action and tool mean the same thing",
+        "no_post_action_information": "No information appears after the action point",
+        "msa_natural_and_unambiguous": "MSA wording is natural (compare Arabic variants)",
+    }
+    failed_report = _run_js_logic("reportRecords", failed_checklist, keys, labels)
+    assert "Failed checklist: Matches the intended formal specification" in failed_report[0]["field"]
+    failed_notes = _run_js_logic("buildIssueNotes", failed_report)
+    assert "Failed checklist: Matches the intended formal specification" in failed_notes
+    assert 'expected "$80"; observed "$90"' in failed_notes
+    for field_other in ("", "problem"):
+        generic_checklist_field = {
+            **failed_checklist,
+            "issue_reports": {"checklist:matches_formal_spec": [{
+                "turn_index": 4,
+                "field": "Other / not covered",
+                "field_other": field_other,
+                "expected": "$80",
+                "observed": "$90",
+                "explanation": "",
+                "explanation_required": False,
+            }]},
+        }
+        rejected = _run_js_logic("reportRecords", generic_checklist_field, keys, labels)
+        assert "generic placeholder" in rejected["error"]
 
 
 def test_new_answer_has_no_preselected_reasons_and_requires_each_checklist_item_independently():
@@ -828,6 +905,20 @@ def test_javascript_checkpoint_restore_preserves_legacy_text_without_preselectin
     assert migrated_report["expected"] == "$80"
 
     valid_turns = {**config, "valid_turns_by_item": {"item-1": [1, 2, 3], "item-2": [1, 2, 3]}}
+    invalid_issue_turn_answer = _run_js_logic("emptyAnswer", valid_turns["checklist_keys"])
+    invalid_issue_turn_answer["issue_codes"] = ["incorrect_number"]
+    invalid_issue_turn_answer["issue_reports"] = {"issue_code:incorrect_number": [{
+        "turn_index": 99,
+        "field": "amount",
+        "field_other": "",
+        "expected": "$80",
+        "observed": "$90",
+        "explanation": "",
+        "explanation_required": False,
+    }]}
+    invalid_issue_checkpoint = {**current, "answers": {"item-2": invalid_issue_turn_answer}}
+    assert "issue report turn" in _run_js_logic("restoreCheckpoint", invalid_issue_checkpoint, valid_turns)["error"]
+
     with_supported_turn = _run_js_logic("emptyAnswer", valid_turns["checklist_keys"])
     with_supported_turn["decisive_update_dependence"] = "yes"
     with_supported_turn["q3_selection"] = {

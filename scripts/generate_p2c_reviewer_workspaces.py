@@ -25,7 +25,7 @@ from multilingual_judge_pilot.p2c_reason_taxonomy import REASON_TAXONOMY_VERSION
 LANGUAGE_CONDITIONS = ("EN-EN", "AR-AR", "EN-AR", "AR-EN")
 EXPECTED_SCENARIOS = 56
 EXPECTED_VARIANTS = 448
-WORKSPACE_VERSION = "p2c-bilingual-review-studio-5"
+WORKSPACE_VERSION = "p2c-bilingual-review-studio-8"
 REVIEW_LOGIC_JS = REPO_ROOT / "scripts" / "p2c_review_logic.js"
 REVIEW_APP_JS = REPO_ROOT / "scripts" / "p2c_reviewer_studio_app.js"
 REQUIRED_CHECKLIST_FIELDS = set(blank_annotation_record("workspace-check", "0" * 64, "0" * 64)["checklist"])
@@ -540,7 +540,12 @@ def _rewrite_app_script(html: str) -> str:
     for match in reversed(list(_SCRIPT.finditer(html))):
         id_match = _ATTR_ID.search(match.group("attrs"))
         if id_match and id_match.group(2) == "p2c-review-logic":
-            html = html[:match.start()] + html[match.end():]
+            end = match.end()
+            if html[end:end + 2] == "\r\n":
+                end += 2
+            elif html[end:end + 1] == "\n":
+                end += 1
+            html = html[:match.start()] + html[end:]
 
     matches = [
         match for match in _SCRIPT.finditer(html)
@@ -692,6 +697,7 @@ def build_workspace_html(
     )
     if any(not _valid_hash(value) for value in legacy_source_fingerprints) or len(set(legacy_source_fingerprints)) != len(legacy_source_fingerprints):
         raise WorkspaceBuildError("legacy checkpoint fingerprints must be unique SHA-256 digests")
+    compatible_legacy_fingerprints = [value for value in legacy_source_fingerprints if value != fingerprint]
 
     scenarios = _source_scenarios(packet_map)
     review_data = {
@@ -701,7 +707,7 @@ def build_workspace_html(
         "source_fingerprint": fingerprint,
         "package_manifest_sha256": package_manifest_sha256,
         "reason_taxonomy": reason_taxonomy_data(),
-        "legacy_source_fingerprints": list(legacy_source_fingerprints),
+        "legacy_source_fingerprints": compatible_legacy_fingerprints,
         "bindings": {key: bindings[key] for key in sorted(bindings)},
         "template": [template_map[key] for key in sorted(template_map)],
         "packets": [packet_map[key] for key in sorted(packet_map)],

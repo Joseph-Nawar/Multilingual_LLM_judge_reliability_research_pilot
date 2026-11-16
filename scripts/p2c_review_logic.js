@@ -21,6 +21,24 @@ function createP2CReviewLogic(taxonomy) {
   const STRUCTURED_CHECKPOINT_FORMAT_2 = "p2c-review-draft-2";
   const OLD_CHECKPOINT_FORMAT = "p2c-review-draft-1";
   const GENERIC_EXPLANATIONS = new Set(["wrong", "unclear", "problem", "issue", "other", "not covered", "bad"]);
+  const GENERIC_ISSUE_FIELDS = new Set([
+    "wrong", "incorrect", "problem", "issue", "other", "not covered", "bad",
+    "unknown field", "some field", "the field", "a field", "the requirement",
+    "a requirement", "the value", "a value", "something",
+  ]);
+  const GENERIC_ISSUE_VALUES = new Set([
+    "wrong", "incorrect", "problem", "issue", "other", "not covered", "bad",
+    "n/a", "n.a.", "not applicable", "no idea", "i don't know", "see above", "as above",
+  ]);
+
+  function specificIssueEvidence(value, label, genericValues) {
+    if (typeof value !== "string") throw new Error(`${label} must be specific evidence`);
+    const cleaned = value.trim().replace(/\s+/g, " ");
+    if (!cleaned || genericValues.has(cleaned.toLowerCase().replace(/[.!?]+$/, ""))) {
+      throw new Error(`${label} cannot be a generic placeholder; identify the specific problem`);
+    }
+    return cleaned;
+  }
 
   function allowedReasons(question, answer) {
     const reasons = taxonomy[question]?.[answer];
@@ -47,7 +65,7 @@ function createP2CReviewLogic(taxonomy) {
     return cleaned;
   }
 
-  function buildRationale(question, answer, selection, validTurnIndices = null) {
+  function buildRationale(question, answer, selection, validTurnIndices = null, decisiveTurnIndex = null) {
     const allowed = allowedReasons(question, answer);
     const keys = ["reasons", "supporting_turns", "fields", "explanation"];
     if (!selection || typeof selection !== "object" || Array.isArray(selection)
@@ -67,7 +85,12 @@ function createP2CReviewLogic(taxonomy) {
     if (validTurnIndices && turns.some((turn) => !validTurnIndices.includes(turn))) {
       throw new Error("supporting turn does not exist in this item's conversation");
     }
-    if (question === "q3" && reasons.includes("multiple_earlier_turns_needed") && turns.length < 2) {
+    const earlierTurns = decisiveTurnIndex === null ? turns : turns.filter((turn) => turn < decisiveTurnIndex);
+    if (answer === "no" && decisiveTurnIndex !== null && earlierTurns.length === 0) {
+      throw new Error("No answers require an earlier supporting turn");
+    }
+    if (question === "q3" && reasons.includes("multiple_earlier_turns_needed") && earlierTurns.length < 2) {
+      if (decisiveTurnIndex !== null) throw new Error("multiple earlier turns reasons require two earlier turns");
       throw new Error("multiple-turn reasons require at least two distinct supporting turns");
     }
     const fields = uniqueStrings(selection.fields, "requirement/field", true);
@@ -102,20 +125,19 @@ function createP2CReviewLogic(taxonomy) {
       if (!Number.isInteger(report.turn_index) || report.turn_index < 0) {
         throw new Error("every issue report needs a valid supporting turn index");
       }
-      if (typeof report.field !== "string" || !report.field.trim()) {
-        throw new Error("every issue report needs an affected field or requirement");
-      }
+      const field = specificIssueEvidence(report.field, "affected field or requirement", GENERIC_ISSUE_FIELDS);
       if ([report.expected, report.observed, report.explanation].some((value) => typeof value !== "string")) {
         throw new Error("issue evidence fields must be text");
       }
       if (typeof report.explanation_required !== "boolean") throw new Error("additional-explanation choice must be yes or no");
-      const field = report.field.trim().replace(/\s+/g, " ");
       let details = `${label} (turn ${report.turn_index}; field ${JSON.stringify(field)})`;
       if (taxonomy.value_pair_types.includes(report.type)) {
         if (!report.expected.trim() || !report.observed.trim()) {
           throw new Error("this issue type requires expected and observed values");
         }
-        details += `: expected ${JSON.stringify(report.expected.trim())}; observed ${JSON.stringify(report.observed.trim())}.`;
+        const expected = specificIssueEvidence(report.expected, "expected meaning/value", GENERIC_ISSUE_VALUES);
+        const observed = specificIssueEvidence(report.observed, "observed meaning/value", GENERIC_ISSUE_VALUES);
+        details += `: expected ${JSON.stringify(expected)}; observed ${JSON.stringify(observed)}.`;
         if (report.explanation_required || report.explanation.trim()) {
           details += " Additional explanation: " + specificExplanation(report.explanation, label) + ".";
         }
@@ -165,7 +187,7 @@ function createP2CReviewLogic(taxonomy) {
     return triggers;
   }
 
-  function reportRecords(answer, checklistKeys, checklistLabels) {
+  function reportRecords(answer, checklistKeys, checklistLabels, validTurnIndices = null) {
     const records = [];
     for (const trigger of issueTriggers(answer, checklistKeys, checklistLabels)) {
       const selected = answer.issue_reports?.[trigger.key];
@@ -173,18 +195,27 @@ function createP2CReviewLogic(taxonomy) {
         throw new Error(`${trigger.label} needs at least one issue report`);
       }
       for (const report of selected) {
+        if (validTurnIndices && !validTurnIndices.includes(report.turn_index)) {
+          throw new Error(`${trigger.label} issue report turn does not exist in this item's conversation`);
+        }
         const { field_other, ...evidence } = report;
+        const selectedField = specificIssueEvidence(
+          report.field === "Other / not covered" ? field_other : report.field,
+          "affected field or requirement",
+          GENERIC_ISSUE_FIELDS,
+        );
         records.push({
           type: trigger.type,
           ...evidence,
-          field: report.field === "Other / not covered" ? field_other : report.field,
+          field: trigger.type === "failed_checklist_item"
+            ? `${trigger.label}; affected field: ${selectedField}` : selectedField,
         });
       }
     }
     return records;
   }
 
-  function problems(answer, checklistKeys, checklistLabels = {}, validTurnIndices = null) {
+  function problems(answer, checklistKeys, checklistLabels = {}, validTurnIndices = null, decisiveTurnIndex = null) {
     const issues = [];
     if (!answer || typeof answer !== "object") return ["Review answers"];
     if (!["equivalent", "meaning_changed", "ambiguous"].includes(answer.semantic_relation)) issues.push("Meaning");
@@ -194,7 +225,7 @@ function createP2CReviewLogic(taxonomy) {
       issues.push("Decisive-update context");
     }
     else {
-      try { answer.decisive_update_dependence_rationale = buildRationale("q3", answer.decisive_update_dependence, answer.q3_selection, validTurnIndices); }
+      try { answer.decisive_update_dependence_rationale = buildRationale("q3", answer.decisive_update_dependence, answer.q3_selection, validTurnIndices, decisiveTurnIndex); }
       catch (error) { answer.decisive_update_dependence_rationale = ""; issues.push("Decisive-update rationale: " + error.message); }
     }
     if (!["yes", "no", "unclear"].includes(answer.whole_action_dependence)) {
@@ -202,7 +233,7 @@ function createP2CReviewLogic(taxonomy) {
       issues.push("Whole-action context");
     }
     else {
-      try { answer.whole_action_dependence_rationale = buildRationale("q4", answer.whole_action_dependence, answer.q4_selection, validTurnIndices); }
+      try { answer.whole_action_dependence_rationale = buildRationale("q4", answer.whole_action_dependence, answer.q4_selection, validTurnIndices, decisiveTurnIndex); }
       catch (error) { answer.whole_action_dependence_rationale = ""; issues.push("Whole-action rationale: " + error.message); }
     }
     if (!Array.isArray(answer.issue_codes) || answer.issue_codes.some((code) => !taxonomy.issue_codes.includes(code))
@@ -210,7 +241,7 @@ function createP2CReviewLogic(taxonomy) {
     const missing = checklistKeys.filter((key) => typeof answer.checklist?.[key] !== "boolean");
     if (missing.length) issues.push(`${missing.length} checklist answer(s)`);
     try {
-      const reports = reportRecords(answer, checklistKeys, checklistLabels);
+      const reports = reportRecords(answer, checklistKeys, checklistLabels, validTurnIndices);
       answer.notes = buildIssueNotes(reports);
     } catch (error) {
       if (issueTriggers(answer, checklistKeys, checklistLabels).length) issues.push("Issue report: " + error.message);
@@ -289,6 +320,9 @@ function createP2CReviewLogic(taxonomy) {
           throw new Error("checkpoint contains malformed additional-explanation choice");
         }
         if (!("explanation_required" in report)) report.explanation_required = false;
+        if (validTurnIndices && Number.isInteger(report.turn_index) && !validTurnIndices.includes(report.turn_index)) {
+          throw new Error("checkpoint contains an issue report turn that does not exist in this item's conversation");
+        }
       }
     }
   }
@@ -388,6 +422,7 @@ function createP2CReviewLogic(taxonomy) {
     allowedReasons,
     buildRationale,
     buildIssueNotes,
+    reportRecords,
     emptySelection,
     emptyAnswer,
     problems,

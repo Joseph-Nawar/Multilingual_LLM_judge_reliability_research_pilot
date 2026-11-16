@@ -99,6 +99,15 @@ _VALUE_PAIR_TYPES = {
 }
 _EXPLANATION_TYPES = {"semantic_ambiguity", "linguistic_defect", "other"}
 _GENERIC_EXPLANATIONS = {"wrong", "unclear", "problem", "issue", "other", "not covered", "bad"}
+_GENERIC_ISSUE_FIELDS = {
+    "wrong", "incorrect", "problem", "issue", "other", "not covered", "bad",
+    "unknown field", "some field", "the field", "a field", "the requirement",
+    "a requirement", "the value", "a value", "something",
+}
+_GENERIC_ISSUE_VALUES = {
+    "wrong", "incorrect", "problem", "issue", "other", "not covered", "bad",
+    "n/a", "n.a.", "not applicable", "no idea", "i don't know", "see above", "as above",
+}
 EXISTING_ISSUE_CODES = (
     "incorrect_number",
     "incorrect_time",
@@ -166,6 +175,15 @@ def _specific_explanation(value: object, label: str) -> str:
     return cleaned
 
 
+def _specific_issue_evidence(value: object, label: str, generic_values: set[str]) -> str:
+    if not isinstance(value, str):
+        raise ValueError(f"{label} must be specific evidence")
+    cleaned = " ".join(value.split())
+    if not cleaned or cleaned.casefold().rstrip(".!?") in generic_values:
+        raise ValueError(f"{label} cannot be a generic placeholder; identify the specific problem")
+    return cleaned
+
+
 def build_rationale(question: str, answer: str, selection: Mapping[str, object]) -> str:
     """Render one substantive legacy rationale from explicit choices and evidence."""
     allowed = allowed_reasons(question, answer)
@@ -224,10 +242,7 @@ def build_issue_notes(reports: Sequence[Mapping[str, object]]) -> str:
         turn = report["turn_index"]
         if type(turn) is not int or turn < 0:
             raise ValueError("every issue report needs a valid supporting turn index")
-        field = report["field"]
-        if not isinstance(field, str) or not field.strip():
-            raise ValueError("every issue report needs an affected field or requirement")
-        field = " ".join(field.split())
+        field = _specific_issue_evidence(report["field"], "affected field or requirement", _GENERIC_ISSUE_FIELDS)
         expected = report["expected"]
         observed = report["observed"]
         explanation = report["explanation"]
@@ -241,7 +256,9 @@ def build_issue_notes(reports: Sequence[Mapping[str, object]]) -> str:
         if kind in _VALUE_PAIR_TYPES:
             if not expected.strip() or not observed.strip():
                 raise ValueError("this issue type requires expected and observed values")
-            details += f": expected {json.dumps(expected.strip(), ensure_ascii=False)}; observed {json.dumps(observed.strip(), ensure_ascii=False)}."
+            specific_expected = _specific_issue_evidence(expected, "expected meaning/value", _GENERIC_ISSUE_VALUES)
+            specific_observed = _specific_issue_evidence(observed, "observed meaning/value", _GENERIC_ISSUE_VALUES)
+            details += f": expected {json.dumps(specific_expected, ensure_ascii=False)}; observed {json.dumps(specific_observed, ensure_ascii=False)}."
             if explanation_required or explanation.strip():
                 details += " Additional explanation: " + _specific_explanation(explanation, ISSUE_TYPES[kind]) + "."
         elif kind in _EXPLANATION_TYPES:

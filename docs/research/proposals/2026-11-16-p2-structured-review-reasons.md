@@ -18,7 +18,7 @@ The existing `yes`, `no`, and `unclear` values and their protocol meanings are u
 | `no` | Earlier numeric value needed; Earlier temporal value needed; Earlier permission state needed; Earlier referent or scope needed; Multiple earlier turns needed; Other / not covered |
 | `unclear` | Ambiguous or conflicting interpretation; Other / not covered |
 
-Multiple compatible reasons may be selected. Selecting “Other / not covered” or “Ambiguous or conflicting interpretation” requires a brief explanation. A selected reason must identify at least one supporting conversation turn and may include the relevant requirement type or field. “Multiple earlier turns needed” requires at least two supporting turns.
+Multiple compatible reasons may be selected. Selecting “Other / not covered” or “Ambiguous or conflicting interpretation” requires a brief explanation. A selected reason must identify at least one supporting conversation turn and may include the relevant requirement type or field. Because a `no` answer means earlier context is needed, it must cite at least one turn before the decisive update. “Multiple earlier turns needed” requires at least two turns before the decisive update.
 
 ## Q4 whole-action dependence reasons
 
@@ -30,7 +30,7 @@ Q4 retains its existing `yes`, `no`, and `unclear` meanings and is never populat
 | `no` | Earlier numerical constraint needed; Earlier temporal constraint needed; Earlier permission information needed; Earlier unrelated requirements needed; Multiple earlier requirements needed; Other / not covered |
 | `unclear` | Ambiguous or conflicting information; Other / not covered |
 
-Multiple compatible reasons may be selected. Selecting “Other / not covered” or “Ambiguous or conflicting information” requires a brief explanation. Reviewers can identify supporting turns and relevant requirements or fields independently of Q3. “Multiple earlier requirements needed” requires at least two selected requirement/field values; both may be supported by the same earlier turn.
+Multiple compatible reasons may be selected. Selecting “Other / not covered” or “Ambiguous or conflicting information” requires a brief explanation. Reviewers can identify supporting turns and relevant requirements or fields independently of Q3. Because a `no` answer means earlier conversation is necessary, it must cite at least one turn before the decisive update. “Multiple earlier requirements needed” requires at least two selected requirement/field values; both may be supported by the same earlier turn.
 
 For each rationale, the form deterministically includes the selected reason labels, selected supporting turn indices, selected requirement/field, and any required explanation. The rationale is generated from the reviewer's explicit selections and contains no model-generated judgment or generic placeholder.
 
@@ -38,7 +38,7 @@ For each rationale, the form deterministically includes the selected reason labe
 
 Clean variants need no notes. A semantic or linguistic defect, an issue code, or a failed checklist item opens a structured issue report. Each report identifies the selected problem category and requests the relevant turn and affected field or requirement. Expected and observed meanings/values are requested for value or meaning discrepancies. “Other / not covered” and novel or complex issues require a brief explanation. The interface generates a substantive, newline-separated `notes` value from these selections and does not accept a generic note as a substitute for issue evidence.
 
-The existing issue-code vocabulary and all eight independent checklist answers are preserved. The final `notes` and rationale strings continue to satisfy the unchanged `p2b1-annotation-2` JSONL contract.
+The existing issue-code vocabulary and all eight independent checklist answers are preserved. Generic placeholders such as “wrong” or “problem” are rejected for issue fields and expected/observed evidence. The final `notes` and rationale strings continue to satisfy the unchanged `p2b1-annotation-2` JSONL contract.
 
 ## Checkpoints and compatibility
 
