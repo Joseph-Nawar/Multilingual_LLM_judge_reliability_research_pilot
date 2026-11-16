@@ -1,29 +1,36 @@
 # P2C bilingual reviewer workspaces
 
-The research-owner supplied review studio is the working interface for the two independent P2C reviewers. The generator embeds each reviewer's own current 56 scenario packets and 448 blank `p2b1-annotation-2` rows into a standalone offline HTML page. It validates the private package manifest and packet/template hashes before writing.
+The two standalone, offline reviewer pages embed separate reviewer-slot source packets and the matching blank 448-row `p2b1-annotation-2` template. The generator verifies the private manifest and packet/template hashes before writing. This structured-reason interface is a **prospective instrument improvement proposed for owner review**; it does not establish bilingual validation or change the dataset, hypotheses, model prompts, locked configuration, or inference gate. See [the proposal](proposals/2026-11-16-p2-structured-review-reasons.md) for the versioned taxonomy and rationale.
 
-Generated files are private and ignored by Git:
+Generated pages remain private and ignored by Git:
 
 - `.research-data/p2c-full/review-package/reviewer_slot_1/bilingual-review-studio.html`
 - `.research-data/p2c-full/review-package/reviewer_slot_2/bilingual-review-studio.html`
 
-## Regenerate after an approved source revision
+## Regenerate after a source revision
 
-Run from the repository root, using the current owner-supplied HTML shell:
+Run from the repository root with the research-owner supplied HTML shell:
 
 ```sh
 ./.venv/bin/python scripts/generate_p2c_reviewer_workspaces.py \
   --studio-html /path/to/bilingual-review-studio-reviewer-2.html
 ```
 
-The command rejects changed source files that do not match the private package manifest. A regenerated workspace has a new source fingerprint when the shell, package, slot, packet, or template changes; drafts and checkpoint files from the earlier fingerprint will not load.
+The command rejects source files that do not match the current private package manifest. It rewrites each slot's existing page only after validating that slot's packets, all 448 template rows, and their hashes. Keep both outputs and all checkpoints in `.research-data/` or another private location; never stage or publish them.
 
-## Reviewer handoff
+## Independent review
 
-Give each reviewer only their assigned HTML file. They can open it directly in a current browser without installing software or loading packet/template files. The page displays one scenario at a time, with history and language-condition navigation, the same action for both histories, the public tool contract, the formal reference, and the English/MSA comparison views.
+Each reviewer independently assesses all 448 variants assigned to that reviewer. No variant is auto-approved or paired with another variant's answers. The workspace preserves the existing Yes/No/Unclear judgments, exact meanings, all eight checklist items, and the existing issue-code vocabulary. Q3 and Q4 remain separate and never infer one another's answers. The interface does not show judge predictions or oracle verdicts.
 
-Review every displayed variant independently. Record semantic relation, linguistic quality, both dependence assessments with separate rationales, and all eight checklist answers. `Unclear` is available for either dependence judgment. Leave notes blank for clean items; explain any flagged problem briefly. The page never copies an answer or rationale to another variant.
+For Q3 and Q4, select a polarity, one or more compatible reasons, and at least one supporting turn. A `no` answer must cite at least one turn before the decisive update. “Multiple earlier turns needed” requires two turns before the decisive update; “Multiple earlier requirements needed” requires two requirement/field selections, which may point to one turn. Select relevant requirement or field details where needed. The workspace generates the existing rationale strings from those explicit choices. A clean variant needs no notes. A semantic or linguistic defect, issue code, or failed checklist item opens a structured report for the relevant turn and field. Value discrepancies need expected and observed entries. Other, ambiguity, and complex or uncategorized problems need a specific explanation.
 
-Answers autosave in that browser. Reviewers should use **Save checkpoint** periodically and keep the downloaded JSON in a private location. To resume on another session, open the same assigned HTML and use **Restore checkpoint**. A checkpoint is rejected if its reviewer slot or source fingerprint differs. When the page reports all 448 variants complete, use **Export final JSONL** and return that file to the researcher through the established private channel. Do not share a checkpoint or export with the other reviewer.
+The page autosaves in that browser. Use **Save checkpoint** periodically and keep the downloaded JSON private. The private checkpoint records the original structured choices, issue evidence, generated strings, taxonomy version, reviewer slot, source fingerprint, and position. Final JSONL export includes only the existing `p2b1-annotation-2` fields and remains subject to the current strict submission validator and adjudication workflow.
 
-The page does not create or infer human answers. Final exports remain subject to the existing strict P2C submission validator and adjudication workflow.
+## Checkpoint compatibility
+
+- A current `p2c-review-draft-3` checkpoint restores in the same reviewer slot and reason-taxonomy version when its source fingerprint is current or is explicitly allowlisted by a previous workspace whose reviewer slot and complete item, variant, and canonical-scenario hash bindings match. This preserves already structured work across a UI-only regeneration with unchanged source hashes.
+- A prior `p2c-review-draft-2` checkpoint with the same verified slot/source binding and taxonomy version is upgraded in memory. Existing structured selections and issue evidence are retained; reports from that format receive an unchecked additional-explanation choice because that control did not exist in that checkpoint version.
+- A legacy `p2c-review-draft-1` checkpoint is offered for migration only when the previous generated workspace has the same reviewer slot and all item, variant, and canonical-scenario hashes match the current package. Existing judgments, checklist answers, issue codes, rationales, and notes are preserved. Old rationale and note text stays visibly marked as legacy evidence and is not converted into a selected reason or issue report. Reviewers must explicitly choose new Q3/Q4 reasons and provide any required structured issue evidence before an item can be complete.
+- A different slot, changed source binding, or unrecognized checkpoint format is rejected with an explanation. The original checkpoint file is not modified and remains available for its matching workspace.
+
+Never copy judgments between variants or reviewer slots. Automated checks of structure, hashes, or span coverage do not establish linguistic equivalence or human validation. The research dataset, reviewer source packets, annotations, and adjudication records remain unchanged by this proposed interface improvement.
