@@ -430,3 +430,45 @@ def test_analysis_counts_ambiguous_and_unattempted_items_after_interruption(tmp_
     failure_counts = report["failure_accounting"]["primary"]
     assert sum(arm["ambiguous_incomplete"] for arm in failure_counts.values()) == 1
     assert sum(arm["not_attempted"] for arm in failure_counts.values()) == 15
+
+
+def test_analysis_rejects_output_path_outside_the_diagnostic_run_directory(tmp_path):
+    freeze_root = _synthetic_freeze(tmp_path)
+    outside_output = tmp_path / "public-analysis.json"
+
+    with pytest.raises(StateAccessError, match="dedicated file directly inside the frozen diagnostic run directory"):
+        analyze_locked_state_access(freeze_root, output_path=outside_output)
+
+    assert not outside_output.exists()
+    assert not (tmp_path / "reference-analysis" / "scored-items.jsonl").exists()
+
+
+def test_analysis_rejects_output_path_that_could_replace_a_raw_result(tmp_path):
+    freeze_root = _synthetic_freeze(tmp_path)
+    output_inside_results = freeze_root / "runs" / "state-access" / "results" / "withheld" / "analysis.json"
+
+    with pytest.raises(StateAccessError, match="dedicated file directly inside the frozen diagnostic run directory"):
+        analyze_locked_state_access(freeze_root, output_path=output_inside_results)
+
+    assert not output_inside_results.exists()
+
+
+def test_analysis_requires_a_settled_run_before_reading_references(tmp_path):
+    freeze_root = _synthetic_freeze(tmp_path)
+
+    with pytest.raises(StateAccessError, match="settled state-access inference run"):
+        analyze_locked_state_access(freeze_root)
+
+    assert not (freeze_root / "runs" / "state-access" / "reference-analysis").exists()
+
+
+def test_analysis_refuses_to_read_references_while_run_lock_exists(tmp_path):
+    freeze_root = _synthetic_freeze(tmp_path)
+    run_locked_state_access(freeze_root, _SyntheticLocalClient())
+    lock_path = freeze_root / "runs" / "state-access" / ".run.lock"
+    lock_path.touch()
+
+    with pytest.raises(StateAccessError, match="active state-access run lock"):
+        analyze_locked_state_access(freeze_root)
+
+    assert not (freeze_root / "runs" / "state-access" / "reference-analysis").exists()

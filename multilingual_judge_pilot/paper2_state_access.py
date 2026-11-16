@@ -524,40 +524,49 @@ def analyze_locked_state_access(
 ) -> dict[str, object]:
     """Validate retained attempts, join reference data post-inference, and write deterministic analysis."""
     root, items, input_manifest, freeze_manifest, freeze_sha, plan, requests = _load_locked_state_access_bundle(freeze_root)
-    reference = _verified_reference_json(root, freeze_manifest, "reference/locked-reference-key.json")
-    metadata = _verified_reference_json(root, freeze_manifest, "reference/locked-analysis-metadata.json")
+    run_root = (root / "runs" / "state-access").resolve()
+    output = (Path(output_path).expanduser().resolve() if output_path is not None else run_root / "analysis.json")
+    reserved_output_names = {"run-manifest.json", ".run.lock", "results", "reference-analysis"}
+    if output.parent != run_root or output.name in reserved_output_names:
+        raise StateAccessError("state-access analysis output must be a dedicated file directly inside the frozen diagnostic run directory")
     item_by_id = {str(item["item_id"]): item for item in items}
     item_ids = set(item_by_id)
-    if set(reference) != item_ids or set(metadata) != item_ids:
-        raise StateAccessError("locked reference and analysis metadata do not match frozen judge-facing items")
-
-    run_root = root / "runs" / "state-access"
+    if (run_root / ".run.lock").exists():
+        raise StateAccessError("cannot analyze while an active state-access run lock exists")
     progress_path = run_root / "run-manifest.json"
-    run_manifest = None
+    if not progress_path.exists():
+        raise StateAccessError("analysis requires a settled state-access inference run before reading references")
+    run_manifest = _read_json(progress_path, "state-access run manifest")
+    run_status = run_manifest.get("status")
+    if run_status not in {"complete", "incomplete", "interrupted"}:
+        raise StateAccessError("analysis requires a settled state-access inference run before reading references")
     run_id = "not-started"
     records: dict[tuple[str, str], dict] = {}
-    if progress_path.exists():
-        run_manifest = _read_json(progress_path, "state-access run manifest")
-        body = {key: value for key, value in run_manifest.items() if key != "manifest_sha256"}
-        if (
-            digest(body) != run_manifest.get("manifest_sha256")
-            or run_manifest.get("manifest_version") != "paper2-state-access-run-manifest-1"
-            or run_manifest.get("plan_sha256") != plan.get("plan_sha256")
-            or run_manifest.get("freeze_manifest_sha256") != freeze_sha
-            or run_manifest.get("input_manifest_sha256") != input_manifest.get("manifest_sha256")
-        ):
-            raise StateAccessError("state-access run manifest is not bound to this frozen diagnostic")
-        run_id = run_manifest.get("run_id")
-        if not isinstance(run_id, str) or not run_id:
-            raise StateAccessError("state-access run ID is malformed")
-        records = _read_attempt_records(run_root, plan, requests, run_id=run_id)
-        hashes = run_manifest.get("result_sha256")
-        expected_hashes = {
-            _request_key(item_id, arm): sha256(_result_path(run_root, item_id, arm).read_bytes()).hexdigest()
-            for item_id, arm in records
-        }
-        if not isinstance(hashes, Mapping) or dict(hashes) != expected_hashes:
-            raise StateAccessError("state-access run manifest result hashes differ from retained attempts")
+    body = {key: value for key, value in run_manifest.items() if key != "manifest_sha256"}
+    if (
+        digest(body) != run_manifest.get("manifest_sha256")
+        or run_manifest.get("manifest_version") != "paper2-state-access-run-manifest-1"
+        or run_manifest.get("plan_sha256") != plan.get("plan_sha256")
+        or run_manifest.get("freeze_manifest_sha256") != freeze_sha
+        or run_manifest.get("input_manifest_sha256") != input_manifest.get("manifest_sha256")
+    ):
+        raise StateAccessError("state-access run manifest is not bound to this frozen diagnostic")
+    run_id = run_manifest.get("run_id")
+    if not isinstance(run_id, str) or not run_id:
+        raise StateAccessError("state-access run ID is malformed")
+    records = _read_attempt_records(run_root, plan, requests, run_id=run_id)
+    hashes = run_manifest.get("result_sha256")
+    expected_hashes = {
+        _request_key(item_id, arm): sha256(_result_path(run_root, item_id, arm).read_bytes()).hexdigest()
+        for item_id, arm in records
+    }
+    if not isinstance(hashes, Mapping) or dict(hashes) != expected_hashes:
+        raise StateAccessError("state-access run manifest result hashes differ from retained attempts")
+
+    reference = _verified_reference_json(root, freeze_manifest, "reference/locked-reference-key.json")
+    metadata = _verified_reference_json(root, freeze_manifest, "reference/locked-analysis-metadata.json")
+    if set(reference) != item_ids or set(metadata) != item_ids:
+        raise StateAccessError("locked reference and analysis metadata do not match frozen judge-facing items")
 
     rows = []
     for item_id in sorted(item_ids):
@@ -584,8 +593,7 @@ def analyze_locked_state_access(
 
     report = summarize_state_access_rows(rows)
     detail_raw = b"".join((canonical_json(row) + "\n").encode("utf-8") for row in rows)
-    output = Path(output_path) if output_path is not None else run_root / "analysis.json"
-    detail_path = output.parent / "reference-analysis" / "scored-items.jsonl"
+    detail_path = run_root / "reference-analysis" / "scored-items.jsonl"
     report["scored_item_detail_sha256"] = _write_private_bytes(detail_path, detail_raw)
     report.update({
         "planned_items": len(items),
