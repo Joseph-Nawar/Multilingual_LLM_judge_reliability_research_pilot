@@ -14,7 +14,11 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from multilingual_judge_pilot.local_ollama import OllamaLocalClient
-from multilingual_judge_pilot.paper2_state_access import StateAccessError, run_locked_state_access
+from multilingual_judge_pilot.paper2_state_access import (
+    StateAccessError,
+    analyze_locked_state_access,
+    run_locked_state_access,
+)
 
 
 def _private_path(value: str | Path) -> Path:
@@ -29,6 +33,8 @@ def build_parser() -> argparse.ArgumentParser:
     sub = parser.add_subparsers(dest="command", required=True)
     run = sub.add_parser("run", help="run or resume the frozen local diagnostic")
     run.add_argument("--freeze-root", type=Path, required=True)
+    analyze = sub.add_parser("analyze", help="score retained outputs against the separate frozen reference key")
+    analyze.add_argument("--freeze-root", type=Path, required=True)
     return parser
 
 
@@ -38,6 +44,8 @@ def main(argv: list[str] | None = None) -> int:
         freeze_root = _private_path(args.freeze_root)
         if args.command == "run":
             result = run_locked_state_access(freeze_root, OllamaLocalClient(timeout_seconds=600))
+        elif args.command == "analyze":
+            result = analyze_locked_state_access(freeze_root)
         else:
             raise StateAccessError("unsupported command")
         print(json.dumps(result, ensure_ascii=False, sort_keys=True, indent=2))

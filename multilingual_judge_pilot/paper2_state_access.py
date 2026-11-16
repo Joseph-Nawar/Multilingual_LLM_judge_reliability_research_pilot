@@ -14,7 +14,16 @@ import tempfile
 from typing import Mapping, Protocol, Sequence
 from uuid import uuid4
 
-from .judge_inference import BINARY_RESPONSE_CONTRACT, PARSER_VERSION, ProviderCallError, canonical_json, response_schema
+from .judge_inference import (
+    BINARY_RESPONSE_CONTRACT,
+    PARSER_VERSION,
+    ParseStatus,
+    ProviderCallError,
+    Verdict,
+    canonical_json,
+    parse_verdict_response,
+    response_schema,
+)
 from .qualification import QUALIFICATION_MODEL_DIGESTS
 
 
@@ -53,6 +62,7 @@ ANALYSIS_DEFINITION: dict[str, object] = {
     "item_correctness": "valid parsed verdict equals the separate reference verdict; all other outcomes are incorrect in planned denominators",
     "correction": "withheld incorrect and supplied correct",
     "damage": "withheld correct and supplied incorrect",
+    "parsed_pair_transitions": "also report correction and damage counts restricted to items with parsed verdicts in both arms",
     "scenario_cluster_bootstrap": {
         "method": "percentile bootstrap resampling scenario IDs with replacement and retaining all items in each selected scenario",
         "replicates": 10000,
@@ -241,6 +251,361 @@ def cluster_interval(rows: list[dict], field: str, *, seed: int = 17) -> tuple[f
     return round(quantile(values, 0.025), 3), round(quantile(values, 0.975), 3)
 
 
+def _scenario_effects(rows: Sequence[Mapping[str, object]]) -> list[dict[str, object]]:
+    scenarios: dict[str, list[Mapping[str, object]]] = defaultdict(list)
+    for row in rows:
+        scenario_id = row.get("scenario_id")
+        if not isinstance(scenario_id, str) or not scenario_id:
+            raise StateAccessError("analysis row has no scenario ID")
+        scenarios[scenario_id].append(row)
+    effects = []
+    for scenario_id in sorted(scenarios):
+        scenario_rows = scenarios[scenario_id]
+        kinds = {row.get("dataset_kind") for row in scenario_rows}
+        families = {row.get("transition_family") for row in scenario_rows}
+        if len(kinds) != 1 or len(families) != 1:
+            raise StateAccessError("analysis scenario has inconsistent dataset kind or transition family")
+        condition_counts = Counter(row.get("language_condition") for row in scenario_rows)
+        if len(scenario_rows) == 8:
+            expected_conditions = Counter({condition: 2 for condition in ("EN-EN", "AR-AR", "EN-AR", "AR-EN")})
+            if condition_counts != expected_conditions:
+                raise StateAccessError("analysis scenario must contain two items per language condition")
+        elif len(scenario_rows) == 2:
+            if len(condition_counts) != 1 or next(iter(condition_counts.values())) != 2:
+                raise StateAccessError("language-condition analysis must retain two paired items per scenario")
+        else:
+            raise StateAccessError("analysis scenario must contain either two grouped items or all eight items")
+        for row in scenario_rows:
+            for arm in ("withheld", "supplied"):
+                if type(row.get(f"{arm}_correct")) is not bool:
+                    raise StateAccessError("analysis correctness values must be booleans")
+        withheld_correct = sum(bool(row["withheld_correct"]) for row in scenario_rows)
+        supplied_correct = sum(bool(row["supplied_correct"]) for row in scenario_rows)
+        corrections = sum(not row["withheld_correct"] and row["supplied_correct"] for row in scenario_rows)
+        damages = sum(row["withheld_correct"] and not row["supplied_correct"] for row in scenario_rows)
+        parsed_pairs = [
+            row for row in scenario_rows
+            if row.get("withheld_parse_status") == ParseStatus.PARSED.value
+            and row.get("supplied_parse_status") == ParseStatus.PARSED.value
+        ]
+        parsed_pair_corrections = sum(not row["withheld_correct"] and row["supplied_correct"] for row in parsed_pairs)
+        parsed_pair_damages = sum(row["withheld_correct"] and not row["supplied_correct"] for row in parsed_pairs)
+        effects.append({
+            "scenario_id": scenario_id,
+            "dataset_kind": next(iter(kinds)),
+            "transition_family": next(iter(families)),
+            "planned_items": len(scenario_rows),
+            "withheld_correct": withheld_correct,
+            "supplied_correct": supplied_correct,
+            "withheld_accuracy": withheld_correct / len(scenario_rows),
+            "supplied_accuracy": supplied_correct / len(scenario_rows),
+            "difference": (supplied_correct - withheld_correct) / len(scenario_rows),
+            "corrections": corrections,
+            "damages": damages,
+            "parsed_pair_count": len(parsed_pairs),
+            "parsed_pair_corrections": parsed_pair_corrections,
+            "parsed_pair_damages": parsed_pair_damages,
+        })
+    return effects
+
+
+def _bootstrap_effect_interval(effects: Sequence[float], *, seed: int = 17) -> tuple[float, float] | None:
+    if not effects:
+        return None
+    rng = random.Random(seed)
+    samples = [
+        sum(effects[rng.randrange(len(effects))] for _ in effects) / len(effects)
+        for _ in range(10000)
+    ]
+    return round(quantile(samples, 0.025), 3), round(quantile(samples, 0.975), 3)
+
+
+def _paired_summary(rows: Sequence[Mapping[str, object]]) -> dict[str, object]:
+    effects = _scenario_effects(rows)
+    scenario_ids = {str(row["scenario_id"]) for row in rows}
+    if len(scenario_ids) != len(effects):
+        raise StateAccessError("scenario analysis did not produce one effect per scenario")
+    total_items = len(rows)
+    if total_items == 0:
+        return {
+            "scenario_count": 0,
+            "planned_denominator_per_arm": 0,
+            "withheld_correct": 0,
+            "supplied_correct": 0,
+            "withheld_accuracy": None,
+            "supplied_accuracy": None,
+            "corrections": 0,
+            "damages": 0,
+            "parsed_pair_count": 0,
+            "parsed_pair_corrections": 0,
+            "parsed_pair_damages": 0,
+            "scenario_macro_difference": None,
+            "scenario_clustered_95pct_ci": None,
+            "scenario_effects": [],
+            "withheld": _arm_accounting(rows, "withheld"),
+            "supplied": _arm_accounting(rows, "supplied"),
+        }
+    scenario_differences = [float(row["difference"]) for row in effects]
+    interval = _bootstrap_effect_interval(scenario_differences, seed=17)
+    withheld_correct = sum(bool(row["withheld_correct"]) for row in rows)
+    supplied_correct = sum(bool(row["supplied_correct"]) for row in rows)
+    return {
+        "scenario_count": len(effects),
+        "planned_denominator_per_arm": total_items,
+        "withheld_correct": withheld_correct,
+        "supplied_correct": supplied_correct,
+        "withheld_accuracy": withheld_correct / total_items,
+        "supplied_accuracy": supplied_correct / total_items,
+        "corrections": sum(int(row["corrections"]) for row in effects),
+        "damages": sum(int(row["damages"]) for row in effects),
+        "parsed_pair_count": sum(int(row["parsed_pair_count"]) for row in effects),
+        "parsed_pair_corrections": sum(int(row["parsed_pair_corrections"]) for row in effects),
+        "parsed_pair_damages": sum(int(row["parsed_pair_damages"]) for row in effects),
+        "scenario_macro_difference": sum(scenario_differences) / len(scenario_differences),
+        "scenario_clustered_95pct_ci": {
+            "lower": interval[0], "upper": interval[1], "replicates": 10000,
+            "cluster_count": len(effects), "seed": 17,
+        } if interval else None,
+        "scenario_effects": effects,
+        "withheld": _arm_accounting(rows, "withheld"),
+        "supplied": _arm_accounting(rows, "supplied"),
+    }
+
+
+def _arm_accounting(rows: Sequence[Mapping[str, object]], arm: str) -> dict[str, object]:
+    return {
+        "attempt_status_counts": dict(sorted(Counter(str(row.get(f"{arm}_attempt_status", "unknown")) for row in rows).items())),
+        "parse_status_counts": dict(sorted(Counter(str(row.get(f"{arm}_parse_status", "unknown")) for row in rows).items())),
+    }
+
+
+def _summarize_groups(rows: Sequence[Mapping[str, object]], group_field: str) -> dict[str, object]:
+    values: dict[str, list[Mapping[str, object]]] = defaultdict(list)
+    for row in rows:
+        values[str(row[group_field])].append(row)
+    output = {}
+    for key in sorted(values):
+        group_rows = values[key]
+        output[key] = {
+            "overall": _paired_summary(group_rows),
+        }
+    return output
+
+
+def _exploratory_primary_auxiliary(primary: Sequence[Mapping[str, object]], auxiliary: Sequence[Mapping[str, object]]) -> dict[str, object]:
+    primary_effects = [float(row["difference"]) for row in _scenario_effects(primary)]
+    auxiliary_effects = [float(row["difference"]) for row in _scenario_effects(auxiliary)]
+    if not primary_effects or not auxiliary_effects:
+        return {"status": "exploratory", "primary_minus_auxiliary": None, "scenario_independent_95pct_ci": None}
+    rng = random.Random(20261115)
+    differences = []
+    for _ in range(10000):
+        primary_mean = sum(primary_effects[rng.randrange(len(primary_effects))] for _ in primary_effects) / len(primary_effects)
+        auxiliary_mean = sum(auxiliary_effects[rng.randrange(len(auxiliary_effects))] for _ in auxiliary_effects) / len(auxiliary_effects)
+        differences.append(primary_mean - auxiliary_mean)
+    return {
+        "status": "exploratory",
+        "primary_scenario_count": len(primary_effects),
+        "auxiliary_scenario_count": len(auxiliary_effects),
+        "primary_minus_auxiliary": sum(primary_effects) / len(primary_effects) - sum(auxiliary_effects) / len(auxiliary_effects),
+        "scenario_independent_95pct_ci": {
+            "lower": round(quantile(differences, 0.025), 3),
+            "upper": round(quantile(differences, 0.975), 3),
+            "replicates": 10000,
+            "seed": 20261115,
+        },
+    }
+
+
+def summarize_state_access_rows(rows: Sequence[Mapping[str, object]]) -> dict[str, object]:
+    """Summarize paired, already reference-scored diagnostic rows deterministically."""
+    if not rows:
+        raise StateAccessError("state-access analysis requires scored rows")
+    valid_kinds = {"primary", "auxiliary_control"}
+    for row in rows:
+        if row.get("dataset_kind") not in valid_kinds:
+            raise StateAccessError("state-access analysis row has an unsupported dataset kind")
+        if row.get("language_condition") not in {"EN-EN", "AR-AR", "EN-AR", "AR-EN"}:
+            raise StateAccessError("state-access analysis row has an unsupported language condition")
+        if row.get("reference") not in {"valid", "invalid"}:
+            raise StateAccessError("state-access analysis row has an invalid reference verdict")
+    _scenario_effects(rows)
+    populations = {
+        "primary": [row for row in rows if row["dataset_kind"] == "primary"],
+        "auxiliary_control": [row for row in rows if row["dataset_kind"] == "auxiliary_control"],
+    }
+    report: dict[str, object] = {"analysis_version": ANALYSIS_VERSION}
+    for kind, population_rows in populations.items():
+        if not population_rows:
+            continue
+        report_key = kind if kind == "primary" else "auxiliary_control"
+        report[report_key] = {
+            "overall": _paired_summary(population_rows),
+            "withheld": _arm_accounting(population_rows, "withheld"),
+            "supplied": _arm_accounting(population_rows, "supplied"),
+            "by_language_condition": _summarize_groups(population_rows, "language_condition"),
+            "by_transition_family": _summarize_groups(population_rows, "transition_family"),
+        }
+    if populations["primary"] and populations["auxiliary_control"]:
+        report["primary_vs_auxiliary_exploratory"] = _exploratory_primary_auxiliary(
+            populations["primary"], populations["auxiliary_control"]
+        )
+    report["analysis_sha256"] = digest(report)
+    return report
+
+
+def _verified_reference_json(root: Path, freeze_manifest: Mapping[str, object], relative: str) -> dict:
+    files = freeze_manifest.get("files")
+    if not isinstance(files, Mapping):
+        raise StateAccessError("freeze manifest file hash inventory is malformed")
+    raw = _verify_frozen_file(root, files, relative)
+    try:
+        value = json.loads(raw, object_pairs_hook=_unique_json_object)
+    except (json.JSONDecodeError, StateAccessError) as exc:
+        raise StateAccessError(f"reference-side analysis file is malformed: {relative}") from exc
+    if not isinstance(value, dict):
+        raise StateAccessError(f"reference-side analysis file must contain an object: {relative}")
+    return value
+
+
+def _parse_attempt(record: Mapping[str, object] | None) -> tuple[str, str, str | None]:
+    if record is None:
+        return "not_attempted", ParseStatus.MISSING.value, None
+    status = record.get("status")
+    if status == "started":
+        return "ambiguous_incomplete", ParseStatus.MISSING.value, None
+    if status == "technical_failure":
+        return "technical_failure", ParseStatus.PROVIDER_FAILURE.value, None
+    if status != "completed":
+        raise StateAccessError("state-access result has an unsupported attempt status")
+    raw = record.get("raw_response")
+    if not isinstance(raw, Mapping):
+        raise StateAccessError("completed state-access result lacks a raw response object")
+    message = raw.get("message")
+    if not isinstance(message, Mapping):
+        parsed = parse_verdict_response(None)
+    else:
+        content = message.get("content")
+        refusal = message.get("refusal")
+        if refusal is not None and type(refusal) is not bool:
+            raise StateAccessError("raw response refusal marker must be boolean when present")
+        parsed = parse_verdict_response(content if isinstance(content, str) else None, provider_refused=bool(refusal))
+    return "completed", parsed.status.value, parsed.verdict.value if parsed.verdict else None
+
+
+def _failure_accounting(rows: Sequence[Mapping[str, object]], arm: str) -> dict[str, int]:
+    attempts = Counter(str(row[f"{arm}_attempt_status"]) for row in rows)
+    parses = Counter(str(row[f"{arm}_parse_status"]) for row in rows)
+    return {
+        "planned": len(rows),
+        "attempts": attempts["completed"] + attempts["technical_failure"] + attempts["ambiguous_incomplete"],
+        "completed": attempts["completed"],
+        "technical_failure": attempts["technical_failure"],
+        "ambiguous_incomplete": attempts["ambiguous_incomplete"],
+        "not_attempted": attempts["not_attempted"],
+        "parsed": parses[ParseStatus.PARSED.value],
+        "refusal": parses[ParseStatus.REFUSED.value],
+        "invalid_output": parses[ParseStatus.INVALID_OUTPUT.value],
+        "missing_output": parses[ParseStatus.MISSING.value],
+        "provider_failure_parse_status": parses[ParseStatus.PROVIDER_FAILURE.value],
+    }
+
+
+def analyze_locked_state_access(
+    freeze_root: str | Path,
+    *,
+    output_path: str | Path | None = None,
+) -> dict[str, object]:
+    """Validate retained attempts, join reference data post-inference, and write deterministic analysis."""
+    root, items, input_manifest, freeze_manifest, freeze_sha, plan, requests = _load_locked_state_access_bundle(freeze_root)
+    reference = _verified_reference_json(root, freeze_manifest, "reference/locked-reference-key.json")
+    metadata = _verified_reference_json(root, freeze_manifest, "reference/locked-analysis-metadata.json")
+    item_by_id = {str(item["item_id"]): item for item in items}
+    item_ids = set(item_by_id)
+    if set(reference) != item_ids or set(metadata) != item_ids:
+        raise StateAccessError("locked reference and analysis metadata do not match frozen judge-facing items")
+
+    run_root = root / "runs" / "state-access"
+    progress_path = run_root / "run-manifest.json"
+    run_manifest = None
+    run_id = "not-started"
+    records: dict[tuple[str, str], dict] = {}
+    if progress_path.exists():
+        run_manifest = _read_json(progress_path, "state-access run manifest")
+        body = {key: value for key, value in run_manifest.items() if key != "manifest_sha256"}
+        if (
+            digest(body) != run_manifest.get("manifest_sha256")
+            or run_manifest.get("manifest_version") != "paper2-state-access-run-manifest-1"
+            or run_manifest.get("plan_sha256") != plan.get("plan_sha256")
+            or run_manifest.get("freeze_manifest_sha256") != freeze_sha
+            or run_manifest.get("input_manifest_sha256") != input_manifest.get("manifest_sha256")
+        ):
+            raise StateAccessError("state-access run manifest is not bound to this frozen diagnostic")
+        run_id = run_manifest.get("run_id")
+        if not isinstance(run_id, str) or not run_id:
+            raise StateAccessError("state-access run ID is malformed")
+        records = _read_attempt_records(run_root, plan, requests, run_id=run_id)
+        hashes = run_manifest.get("result_sha256")
+        expected_hashes = {
+            _request_key(item_id, arm): sha256(_result_path(run_root, item_id, arm).read_bytes()).hexdigest()
+            for item_id, arm in records
+        }
+        if not isinstance(hashes, Mapping) or dict(hashes) != expected_hashes:
+            raise StateAccessError("state-access run manifest result hashes differ from retained attempts")
+
+    rows = []
+    for item_id in sorted(item_ids):
+        item_reference = reference[item_id]
+        item_metadata = metadata[item_id]
+        reference_label = item_reference.get("reference_verdict")
+        if reference_label not in {"valid", "invalid"}:
+            raise StateAccessError("locked reference file contains an invalid verdict")
+        row: dict[str, object] = {
+            "item_id": item_id,
+            "scenario_id": item_metadata.get("scenario_id"),
+            "dataset_kind": item_metadata.get("dataset_kind"),
+            "transition_family": item_metadata.get("transition_family"),
+            "language_condition": item_by_id[item_id].get("language_condition"),
+            "reference": reference_label,
+        }
+        for arm in ("withheld", "supplied"):
+            attempt_status, parse_status, prediction = _parse_attempt(records.get((item_id, arm)))
+            row[f"{arm}_attempt_status"] = attempt_status
+            row[f"{arm}_parse_status"] = parse_status
+            row[f"{arm}_prediction"] = prediction
+            row[f"{arm}_correct"] = parse_status == ParseStatus.PARSED.value and prediction == reference_label
+        rows.append(row)
+
+    report = summarize_state_access_rows(rows)
+    detail_raw = b"".join((canonical_json(row) + "\n").encode("utf-8") for row in rows)
+    output = Path(output_path) if output_path is not None else run_root / "analysis.json"
+    detail_path = output.parent / "reference-analysis" / "scored-items.jsonl"
+    report["scored_item_detail_sha256"] = _write_private_bytes(detail_path, detail_raw)
+    report.update({
+        "planned_items": len(items),
+        "planned_requests": int(plan["planned_request_count"]),
+        "plan_sha256": plan["plan_sha256"],
+        "input_manifest_sha256": input_manifest["manifest_sha256"],
+        "freeze_manifest_sha256": freeze_sha,
+        "run_id": run_id,
+        "run_status": run_manifest.get("status") if run_manifest else "not_started",
+        "attempt_accounting": _attempt_summary(records, int(plan["planned_request_count"])),
+        "failure_accounting": {
+            population: {
+                arm: _failure_accounting([row for row in rows if row["dataset_kind"] == dataset_kind], arm)
+                for arm in ("withheld", "supplied")
+            }
+            for population, dataset_kind in (("primary", "primary"), ("auxiliary_control", "auxiliary_control"))
+        },
+    })
+    report.pop("analysis_sha256", None)
+    report["analysis_sha256"] = digest(report)
+    _write_json(output, report)
+    sidecar = output.with_suffix(output.suffix + ".sha256")
+    _write_private_bytes(sidecar, f"{sha256(output.read_bytes()).hexdigest()}  {output.name}\n".encode("ascii"))
+    return report
+
+
 def _json_bytes(value: object) -> bytes:
     return (json.dumps(value, ensure_ascii=False, sort_keys=True, indent=2) + "\n").encode("utf-8")
 
@@ -397,6 +762,23 @@ def _write_json(path: Path, value: object, *, replace: bool = True) -> str:
             os.fsync(stream.fileno())
         if not replace and path.exists():
             raise StateAccessError("attempt record already exists; refusing a duplicate call")
+        os.replace(temporary, path)
+    finally:
+        if os.path.exists(temporary):
+            os.unlink(temporary)
+    return sha256(raw).hexdigest()
+
+
+def _write_private_bytes(path: Path, raw: bytes) -> str:
+    path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    os.chmod(path.parent, 0o700)
+    fd, temporary = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".tmp", dir=path.parent)
+    try:
+        os.fchmod(fd, 0o600)
+        with os.fdopen(fd, "wb") as stream:
+            stream.write(raw)
+            stream.flush()
+            os.fsync(stream.fileno())
         os.replace(temporary, path)
     finally:
         if os.path.exists(temporary):

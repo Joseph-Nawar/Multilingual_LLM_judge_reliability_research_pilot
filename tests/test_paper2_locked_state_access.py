@@ -12,10 +12,13 @@ from multilingual_judge_pilot.paper2_state_access import (
     MODEL,
     MODEL_DIGEST,
     StateAccessError,
+    analyze_locked_state_access,
     build_locked_state_access_artifacts,
     project_effective_state,
     run_locked_state_access,
+    summarize_state_access_rows,
 )
+from multilingual_judge_pilot.judge_inference import ProviderCallError
 from scripts.paper2_scientific_checkpoint import INSTRUCTION, OPTIONS, SCHEMA, VERSION
 
 
@@ -188,9 +191,20 @@ def test_locked_bundle_randomization_and_hashes_are_deterministic():
 
 
 class _SyntheticLocalClient:
-    def __init__(self, *, interrupt_on_call: int | None = None, digest: str = MODEL_DIGEST):
+    def __init__(
+        self,
+        *,
+        interrupt_on_call: int | None = None,
+        technical_failure_on_call: int | None = None,
+        invalid_output_on_call: int | None = None,
+        refusal_on_call: int | None = None,
+        digest: str = MODEL_DIGEST,
+    ):
         self.calls = []
         self.interrupt_on_call = interrupt_on_call
+        self.technical_failure_on_call = technical_failure_on_call
+        self.invalid_output_on_call = invalid_output_on_call
+        self.refusal_on_call = refusal_on_call
         self.digest = digest
 
     def discover_model(self, model_tag: str):
@@ -201,9 +215,20 @@ class _SyntheticLocalClient:
         self.calls.append(payload)
         if self.interrupt_on_call == len(self.calls):
             raise KeyboardInterrupt("synthetic interruption")
+        if self.technical_failure_on_call == len(self.calls):
+            raise ProviderCallError("synthetic_transport_error", raw_response="synthetic local failure")
+        if self.invalid_output_on_call == len(self.calls):
+            content = "not-json"
+            refusal = False
+        elif self.refusal_on_call == len(self.calls):
+            content = ""
+            refusal = True
+        else:
+            content = '{"verdict":"valid"}'
+            refusal = False
         return {
             "model": MODEL,
-            "message": {"role": "assistant", "content": '{"verdict":"valid"}'},
+            "message": {"role": "assistant", "content": content, "refusal": refusal},
             "done": True,
         }
 
@@ -233,7 +258,8 @@ def test_runner_preserves_raw_outputs_and_skips_all_terminal_attempts(tmp_path):
     result_files = list((freeze_root / "runs" / "state-access" / "results").glob("*/*.json"))
     assert len(result_files) == 16
     record = json.loads(result_files[0].read_text())
-    assert record["raw_response"] == {"model": MODEL, "message": {"role": "assistant", "content": '{"verdict":"valid"}'}, "done": True}
+    assert record["raw_response"]["model"] == MODEL
+    assert record["raw_response"]["done"] is True
 
     resumed_client = _SyntheticLocalClient()
     resumed = run_locked_state_access(freeze_root, resumed_client)
@@ -282,3 +308,106 @@ def test_runner_rejects_a_tampered_frozen_request_before_any_call(tmp_path):
         run_locked_state_access(freeze_root, client)
 
     assert client.calls == []
+
+
+def _scored_rows():
+    scenarios = (
+        ("primary-improved", "primary", "numerical_revision", "improved"),
+        ("primary-damaged", "primary", "temporal_revision", "damaged"),
+        ("auxiliary-stable", "auxiliary_control", "no_change_restatement", "stable"),
+        ("auxiliary-improved", "auxiliary_control", "no_change_restatement", "improved"),
+    )
+    rows = []
+    for scenario_id, dataset_kind, family, pattern in scenarios:
+        for item_number, condition in enumerate(("EN-EN", "EN-EN", "AR-AR", "AR-AR", "EN-AR", "EN-AR", "AR-EN", "AR-EN")):
+            if pattern == "improved":
+                withheld_correct, supplied_correct = False, item_number < 2
+            elif pattern == "damaged":
+                withheld_correct, supplied_correct = True, item_number != 0
+            elif pattern == "stable":
+                withheld_correct = supplied_correct = True
+            else:
+                withheld_correct, supplied_correct = False, item_number == 0
+            row = {
+                "scenario_id": scenario_id,
+                "dataset_kind": dataset_kind,
+                "transition_family": family,
+                "language_condition": condition,
+                "reference": "valid",
+                "withheld_prediction": "valid" if withheld_correct else "invalid",
+                "supplied_prediction": "valid" if supplied_correct else "invalid",
+                "withheld_correct": withheld_correct,
+                "supplied_correct": supplied_correct,
+                "withheld_parse_status": "parsed",
+                "supplied_parse_status": "parsed",
+                "withheld_attempt_status": "completed",
+                "supplied_attempt_status": "completed",
+            }
+            if pattern == "improved" and item_number == 2:
+                row.update(withheld_prediction=None, withheld_correct=False, withheld_parse_status="provider_failure", withheld_attempt_status="technical_failure")
+            if pattern == "improved" and item_number == 3:
+                row.update(supplied_prediction=None, supplied_correct=False, supplied_parse_status="missing", supplied_attempt_status="not_attempted")
+            rows.append(row)
+    return rows
+
+
+def test_analysis_reports_paired_scenario_effects_conditions_families_and_exploratory_control():
+    rows = _scored_rows()
+
+    summary = summarize_state_access_rows(rows)
+    repeated = summarize_state_access_rows(rows)
+
+    primary = summary["primary"]
+    assert primary["overall"]["corrections"] == 2
+    assert primary["overall"]["damages"] == 1
+    assert primary["overall"]["parsed_pair_corrections"] == 2
+    assert primary["overall"]["parsed_pair_damages"] == 1
+    assert primary["overall"]["scenario_macro_difference"] == 0.0625
+    assert primary["overall"]["scenario_clustered_95pct_ci"]["cluster_count"] == 2
+    assert primary["overall"]["scenario_clustered_95pct_ci"]["replicates"] == 10000
+    assert primary["overall"]["scenario_clustered_95pct_ci"] == repeated["primary"]["overall"]["scenario_clustered_95pct_ci"]
+    assert set(primary["by_language_condition"]) == {"EN-EN", "AR-AR", "EN-AR", "AR-EN"}
+    assert set(primary["by_transition_family"]) == {"numerical_revision", "temporal_revision"}
+    assert primary["by_transition_family"]["numerical_revision"]["overall"]["withheld"]["attempt_status_counts"]["technical_failure"] == 1
+    assert primary["by_transition_family"]["numerical_revision"]["overall"]["supplied"]["attempt_status_counts"]["not_attempted"] == 1
+    comparison = summary["primary_vs_auxiliary_exploratory"]
+    assert comparison["status"] == "exploratory"
+    assert comparison["primary_minus_auxiliary"] == -0.0625
+    assert summary["analysis_sha256"] == repeated["analysis_sha256"]
+
+
+def test_analysis_scores_raw_outputs_without_changing_attempt_records(tmp_path):
+    freeze_root = _synthetic_freeze(tmp_path)
+    client = _SyntheticLocalClient(technical_failure_on_call=1, invalid_output_on_call=2, refusal_on_call=3)
+    run_locked_state_access(freeze_root, client)
+    result_files = sorted((freeze_root / "runs" / "state-access" / "results").rglob("*.json"))
+    hashes_before = {path.name: hashlib.sha256(path.read_bytes()).hexdigest() for path in result_files}
+
+    report = analyze_locked_state_access(freeze_root)
+    repeated = analyze_locked_state_access(freeze_root)
+
+    assert report["planned_items"] == 8
+    assert report["primary"]["overall"]["planned_denominator_per_arm"] == 8
+    assert sum(report["primary"]["overall"]["withheld"]["parse_status_counts"].values()) == 8
+    assert sum(report["primary"]["overall"]["supplied"]["parse_status_counts"].values()) == 8
+    primary_arms = report["failure_accounting"]["primary"]
+    assert sum(arm["technical_failure"] for arm in primary_arms.values()) == 1
+    assert sum(arm["invalid_output"] for arm in primary_arms.values()) == 1
+    assert sum(arm["refusal"] for arm in primary_arms.values()) == 1
+    assert sum(arm["parsed"] for arm in primary_arms.values()) == 13
+    detail = freeze_root / "runs" / "state-access" / "reference-analysis" / "scored-items.jsonl"
+    assert hashlib.sha256(detail.read_bytes()).hexdigest() == report["scored_item_detail_sha256"]
+    assert report["analysis_sha256"] == repeated["analysis_sha256"]
+    assert {path.name: hashlib.sha256(path.read_bytes()).hexdigest() for path in result_files} == hashes_before
+
+
+def test_analysis_counts_ambiguous_and_unattempted_items_after_interruption(tmp_path):
+    freeze_root = _synthetic_freeze(tmp_path)
+    interrupted = _SyntheticLocalClient(interrupt_on_call=1)
+    with pytest.raises(KeyboardInterrupt):
+        run_locked_state_access(freeze_root, interrupted)
+
+    report = analyze_locked_state_access(freeze_root)
+    failure_counts = report["failure_accounting"]["primary"]
+    assert sum(arm["ambiguous_incomplete"] for arm in failure_counts.values()) == 1
+    assert sum(arm["not_attempted"] for arm in failure_counts.values()) == 15
