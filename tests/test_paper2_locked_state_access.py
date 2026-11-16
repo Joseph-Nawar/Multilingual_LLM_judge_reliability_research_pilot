@@ -14,6 +14,7 @@ from multilingual_judge_pilot.paper2_state_access import (
     StateAccessError,
     analyze_locked_state_access,
     build_locked_state_access_artifacts,
+    digest,
     project_effective_state,
     run_locked_state_access,
     summarize_state_access_rows,
@@ -308,6 +309,24 @@ def test_runner_rejects_a_tampered_frozen_request_before_any_call(tmp_path):
         run_locked_state_access(freeze_root, client)
 
     assert client.calls == []
+
+
+def test_runner_rejects_attempt_record_missing_from_resume_manifest(tmp_path):
+    freeze_root = _synthetic_freeze(tmp_path)
+    first = _SyntheticLocalClient()
+    run_locked_state_access(freeze_root, first)
+    manifest_path = freeze_root / "runs" / "state-access" / "run-manifest.json"
+    manifest = json.loads(manifest_path.read_text())
+    manifest["result_sha256"].pop(next(iter(manifest["result_sha256"])))
+    body = {key: value for key, value in manifest.items() if key != "manifest_sha256"}
+    manifest["manifest_sha256"] = digest(body)
+    manifest_path.write_text(json.dumps(manifest, sort_keys=True))
+
+    resumed = _SyntheticLocalClient()
+    with pytest.raises(StateAccessError, match="attempt records"):
+        run_locked_state_access(freeze_root, resumed)
+
+    assert resumed.calls == []
 
 
 def _scored_rows():

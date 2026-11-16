@@ -70,7 +70,13 @@ ANALYSIS_DEFINITION: dict[str, object] = {
         "quantile_rule": "floor((n - 1) * p)",
         "interval": "95%",
     },
-    "primary_versus_auxiliary": "exploratory difference between independent macro-averaged scenario effects; resample primary and auxiliary scenarios independently",
+    "primary_versus_auxiliary": {
+        "status": "exploratory",
+        "estimand": "difference between independent macro-averaged scenario effects",
+        "bootstrap": "resample primary and auxiliary scenario IDs independently",
+        "replicates": 10000,
+        "seed": 20261115,
+    },
     "report_groups": ["language_condition", "transition_family", "dataset_kind"],
     "failure_accounting": "preserve planned denominator and report unattempted, ambiguous, technical, refusal, invalid-output, and parsed outcomes separately",
     "claim_limit": "behavioral response to supplied state does not establish an internal reasoning mechanism",
@@ -1080,14 +1086,19 @@ def run_locked_state_access(freeze_root: str | Path, client: LocalClient) -> dic
             frozen_result_hashes = existing_progress.get("result_sha256")
             if not isinstance(frozen_result_hashes, Mapping):
                 raise StateAccessError("existing state-access result hash inventory is malformed")
-            if set(frozen_result_hashes) - {_request_key(item_id, arm) for item_id, arm in records}:
-                raise StateAccessError("state-access manifest refers to an absent attempt")
+            record_keys = {_request_key(item_id, arm) for item_id, arm in records}
+            if set(frozen_result_hashes) != record_keys:
+                raise StateAccessError("state-access manifest and retained attempt records do not match")
             for (item_id, arm), record in records.items():
                 key = _request_key(item_id, arm)
-                if key in frozen_result_hashes:
-                    actual = sha256(_result_path(run_root, item_id, arm).read_bytes()).hexdigest()
-                    if actual != frozen_result_hashes[key]:
-                        raise StateAccessError("state-access attempt changed after it was recorded")
+                actual = sha256(_result_path(run_root, item_id, arm).read_bytes()).hexdigest()
+                if actual != frozen_result_hashes[key]:
+                    raise StateAccessError("state-access attempt changed after it was recorded")
+            previous_summary = _attempt_summary(records, int(plan["planned_request_count"]))
+            if existing_progress.get("status") == "complete" and (
+                previous_summary["not_attempted"] or previous_summary["ambiguous_incomplete"]
+            ):
+                raise StateAccessError("complete state-access manifest has incomplete attempt records")
 
         def persist_progress(status: str) -> None:
             progress = _progress_record(
