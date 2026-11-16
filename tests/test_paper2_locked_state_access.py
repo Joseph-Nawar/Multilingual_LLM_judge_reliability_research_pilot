@@ -4,12 +4,17 @@ from __future__ import annotations
 
 import hashlib
 import json
+from types import SimpleNamespace
 
 import pytest
 
 from multilingual_judge_pilot.paper2_state_access import (
+    MODEL,
+    MODEL_DIGEST,
+    StateAccessError,
     build_locked_state_access_artifacts,
     project_effective_state,
+    run_locked_state_access,
 )
 from scripts.paper2_scientific_checkpoint import INSTRUCTION, OPTIONS, SCHEMA, VERSION
 
@@ -180,3 +185,100 @@ def test_locked_bundle_randomization_and_hashes_are_deterministic():
     )
 
     assert first == second
+
+
+class _SyntheticLocalClient:
+    def __init__(self, *, interrupt_on_call: int | None = None, digest: str = MODEL_DIGEST):
+        self.calls = []
+        self.interrupt_on_call = interrupt_on_call
+        self.digest = digest
+
+    def discover_model(self, model_tag: str):
+        assert model_tag == MODEL
+        return SimpleNamespace(model_tag=model_tag, digest=self.digest)
+
+    def chat(self, payload):
+        self.calls.append(payload)
+        if self.interrupt_on_call == len(self.calls):
+            raise KeyboardInterrupt("synthetic interruption")
+        return {
+            "model": MODEL,
+            "message": {"role": "assistant", "content": '{"verdict":"valid"}'},
+            "done": True,
+        }
+
+
+def _synthetic_freeze(tmp_path):
+    from tests.test_p2c_full_study import _create_synthetic_freeze
+
+    return _create_synthetic_freeze(tmp_path)
+
+
+def test_runner_preserves_raw_outputs_and_skips_all_terminal_attempts(tmp_path):
+    freeze_root = _synthetic_freeze(tmp_path)
+    first_client = _SyntheticLocalClient()
+
+    summary = run_locked_state_access(freeze_root, first_client)
+
+    assert summary["planned_requests"] == 16
+    assert summary["attempts"] == 16
+    assert summary["completed"] == 16
+    assert len(first_client.calls) == 16
+    request = json.loads(first_client.calls[0]["messages"][1]["content"])
+    assert set(request) == {"item_id", "conversation", "action", "public_tool_schema", "effective_state"}
+    assert "reference_verdict" not in json.dumps(request)
+    assert first_client.calls[0]["model"] == MODEL
+    assert first_client.calls[0]["options"] == OPTIONS
+
+    result_files = list((freeze_root / "runs" / "state-access" / "results").glob("*/*.json"))
+    assert len(result_files) == 16
+    record = json.loads(result_files[0].read_text())
+    assert record["raw_response"] == {"model": MODEL, "message": {"role": "assistant", "content": '{"verdict":"valid"}'}, "done": True}
+
+    resumed_client = _SyntheticLocalClient()
+    resumed = run_locked_state_access(freeze_root, resumed_client)
+
+    assert resumed["reused"] == 16
+    assert resumed_client.calls == []
+
+
+def test_runner_never_resends_an_interrupted_started_attempt(tmp_path):
+    freeze_root = _synthetic_freeze(tmp_path)
+    interrupted_client = _SyntheticLocalClient(interrupt_on_call=1)
+
+    with pytest.raises(KeyboardInterrupt, match="synthetic interruption"):
+        run_locked_state_access(freeze_root, interrupted_client)
+
+    resume_client = _SyntheticLocalClient()
+    summary = run_locked_state_access(freeze_root, resume_client)
+
+    assert len(interrupted_client.calls) == 1
+    assert len(resume_client.calls) == 15
+    assert summary["planned_requests"] == 16
+    assert summary["attempts"] == 16
+    assert summary["completed"] == 15
+    assert summary["ambiguous_incomplete"] == 1
+    assert summary["not_attempted"] == 0
+
+
+def test_runner_rejects_model_digest_mismatch_before_any_call(tmp_path):
+    freeze_root = _synthetic_freeze(tmp_path)
+    client = _SyntheticLocalClient(digest="sha256:wrong")
+
+    with pytest.raises(StateAccessError, match="model identity/digest"):
+        run_locked_state_access(freeze_root, client)
+
+    assert client.calls == []
+
+
+def test_runner_rejects_a_tampered_frozen_request_before_any_call(tmp_path):
+    freeze_root = _synthetic_freeze(tmp_path)
+    request_path = next((freeze_root / "diagnostics" / "state-access" / "requests" / "supplied").glob("*.json"))
+    request_path.chmod(0o600)
+    request_path.write_bytes(request_path.read_bytes() + b" ")
+    client = _SyntheticLocalClient()
+
+    with pytest.raises(StateAccessError, match="hash mismatch"):
+        run_locked_state_access(freeze_root, client)
+
+    assert client.calls == []

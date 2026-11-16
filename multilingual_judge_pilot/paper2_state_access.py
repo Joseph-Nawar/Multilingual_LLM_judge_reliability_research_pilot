@@ -3,13 +3,18 @@
 from __future__ import annotations
 
 from collections import Counter, defaultdict
+from datetime import datetime, timezone
 from hashlib import sha256
 import json
+import os
 import random
 import re
-from typing import Mapping, Sequence
+from pathlib import Path
+import tempfile
+from typing import Mapping, Protocol, Sequence
+from uuid import uuid4
 
-from .judge_inference import BINARY_RESPONSE_CONTRACT, PARSER_VERSION, canonical_json, response_schema
+from .judge_inference import BINARY_RESPONSE_CONTRACT, PARSER_VERSION, ProviderCallError, canonical_json, response_schema
 from .qualification import QUALIFICATION_MODEL_DIGESTS
 
 
@@ -69,6 +74,12 @@ _HASH_RE = re.compile(r"^[0-9a-f]{64}$")
 
 class StateAccessError(ValueError):
     """A diagnostic state, bundle, or result violates its frozen contract."""
+
+
+class LocalClient(Protocol):
+    def discover_model(self, model_tag: str): ...
+
+    def chat(self, payload: Mapping[str, object]) -> Mapping[str, object]: ...
 
 
 def digest(value: object) -> str:
@@ -352,3 +363,420 @@ def build_locked_state_access_artifacts(
     plan["plan_sha256"] = digest(plan_body)
     artifacts[f"{LOCKED_STATE_ACCESS_DIRECTORY}/plan.json"] = _json_bytes(plan)
     return artifacts
+
+
+def _unique_json_object(pairs):
+    result = {}
+    for key, value in pairs:
+        if key in result:
+            raise StateAccessError(f"duplicate JSON key: {key}")
+        result[key] = value
+    return result
+
+
+def _read_json(path: Path, description: str) -> dict:
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"), object_pairs_hook=_unique_json_object)
+    except (OSError, json.JSONDecodeError, StateAccessError) as exc:
+        raise StateAccessError(f"{description} is missing or malformed") from exc
+    if not isinstance(value, dict):
+        raise StateAccessError(f"{description} must be an object")
+    return value
+
+
+def _write_json(path: Path, value: object, *, replace: bool = True) -> str:
+    raw = _json_bytes(value)
+    path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    os.chmod(path.parent, 0o700)
+    fd, temporary = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".tmp", dir=path.parent)
+    try:
+        os.fchmod(fd, 0o600)
+        with os.fdopen(fd, "wb") as stream:
+            stream.write(raw)
+            stream.flush()
+            os.fsync(stream.fileno())
+        if not replace and path.exists():
+            raise StateAccessError("attempt record already exists; refusing a duplicate call")
+        os.replace(temporary, path)
+    finally:
+        if os.path.exists(temporary):
+            os.unlink(temporary)
+    return sha256(raw).hexdigest()
+
+
+def _utc_now() -> str:
+    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+def _request_key(item_id: str, arm: str) -> str:
+    return f"{arm}:{item_id}"
+
+
+def _result_path(run_root: Path, item_id: str, arm: str) -> Path:
+    item_key = sha256(item_id.encode("utf-8")).hexdigest()
+    return run_root / "results" / arm / f"{item_key}.json"
+
+
+def _verify_frozen_file(root: Path, files: Mapping[str, object], relative: str) -> bytes:
+    expected = files.get(relative)
+    if not isinstance(expected, str) or not _HASH_RE.fullmatch(expected):
+        raise StateAccessError(f"frozen state-access file is absent from the manifest: {relative}")
+    try:
+        raw = (root / relative).read_bytes()
+    except OSError as exc:
+        raise StateAccessError(f"frozen state-access file is missing: {relative}") from exc
+    if sha256(raw).hexdigest() != expected:
+        raise StateAccessError(f"frozen state-access file hash mismatch: {relative}")
+    return raw
+
+
+def _load_locked_state_access_bundle(freeze_root: str | Path):
+    from .p2c_inference import load_frozen_inputs
+
+    root = Path(freeze_root)
+    try:
+        items, input_manifest, freeze_manifest = load_frozen_inputs(root, partition="locked")
+    except (OSError, ValueError) as exc:
+        raise StateAccessError("locked study freeze is invalid") from exc
+    if (
+        freeze_manifest.get("manifest_version") != "p2c-full-study-freeze-2"
+        or freeze_manifest.get("state_access_diagnostic_separately_frozen") is not True
+    ):
+        raise StateAccessError("freeze lacks the separately frozen state-access bundle")
+    files = freeze_manifest.get("files")
+    if not isinstance(files, Mapping):
+        raise StateAccessError("freeze file hash inventory is malformed")
+    relative_plan = f"{LOCKED_STATE_ACCESS_DIRECTORY}/plan.json"
+    relative_projection = f"{LOCKED_STATE_ACCESS_DIRECTORY}/locked-state-projection.jsonl"
+    plan_raw = _verify_frozen_file(root, files, relative_plan)
+    projection_raw = _verify_frozen_file(root, files, relative_projection)
+    try:
+        plan = json.loads(plan_raw, object_pairs_hook=_unique_json_object)
+    except (json.JSONDecodeError, StateAccessError) as exc:
+        raise StateAccessError("frozen state-access plan is malformed") from exc
+    if not isinstance(plan, dict):
+        raise StateAccessError("frozen state-access plan must be an object")
+    plan_body = {key: value for key, value in plan.items() if key != "plan_sha256"}
+    if digest(plan_body) != plan.get("plan_sha256"):
+        raise StateAccessError("frozen state-access plan self-hash is invalid")
+    if (
+        plan.get("plan_version") != LOCKED_STATE_ACCESS_PLAN_VERSION
+        or plan.get("diagnostic_version") != VERSION
+        or plan.get("prompt_version") != VERSION
+        or plan.get("instruction") != INSTRUCTION
+        or plan.get("instruction_sha256") != sha256(INSTRUCTION.encode("utf-8")).hexdigest()
+        or plan.get("response_contract_version") != BINARY_RESPONSE_CONTRACT
+        or plan.get("response_schema") != SCHEMA
+        or plan.get("response_schema_sha256") != digest(SCHEMA)
+        or plan.get("model") != MODEL
+        or plan.get("model_digest") != MODEL_DIGEST
+        or plan.get("options") != OPTIONS
+        or plan.get("think") is not False
+        or plan.get("parser_version") != PARSER_VERSION
+        or plan.get("attempt_policy") != "one call per arm/item; no retries"
+        or plan.get("analysis_definition") != ANALYSIS_DEFINITION
+        or plan.get("input_manifest_sha256") != input_manifest.get("manifest_sha256")
+        or plan.get("state_projection_sha256") != sha256(projection_raw).hexdigest()
+    ):
+        raise StateAccessError("frozen state-access plan differs from the development-tested contract")
+
+    projection_by_id = {}
+    try:
+        projection_lines = projection_raw.decode("utf-8").splitlines()
+        for line in projection_lines:
+            if not line.strip():
+                raise StateAccessError("frozen state projection contains a blank line")
+            row = json.loads(line, object_pairs_hook=_unique_json_object)
+            if not isinstance(row, dict) or set(row) != {"item_id", "effective_state"}:
+                raise StateAccessError("frozen state projection row has unexpected fields")
+            item_id = row["item_id"]
+            if not isinstance(item_id, str) or item_id in projection_by_id or not safe_state(row["effective_state"]):
+                raise StateAccessError("frozen state projection has duplicate IDs or an invalid state")
+            projection_by_id[item_id] = row["effective_state"]
+    except (UnicodeDecodeError, json.JSONDecodeError, StateAccessError) as exc:
+        raise StateAccessError("frozen state projection is invalid") from exc
+
+    item_by_id = {str(row["item_id"]): row for row in items}
+    if set(projection_by_id) != set(item_by_id) or plan.get("item_count") != len(item_by_id):
+        raise StateAccessError("frozen state projection does not match the locked item inventory")
+    if plan.get("planned_item_count") != len(item_by_id) or plan.get("planned_request_count") != 2 * len(item_by_id):
+        raise StateAccessError("frozen state-access request counts do not match the locked item inventory")
+
+    request_hashes = plan.get("request_sha256")
+    randomization = plan.get("randomization")
+    if not isinstance(request_hashes, Mapping) or not isinstance(randomization, Mapping):
+        raise StateAccessError("frozen state-access request or randomization inventory is malformed")
+    order = randomization.get("order")
+    seed_hex = randomization.get("seed_hex")
+    if (
+        randomization.get("version") != "python-random-shuffle-with-frozen-seed-v1"
+        or not isinstance(seed_hex, str)
+        or not _HASH_RE.fullmatch(seed_hex)
+        or not isinstance(order, list)
+    ):
+        raise StateAccessError("frozen state-access order seed or order is malformed")
+    expected_order = [(item_id, arm) for item_id in sorted(item_by_id) for arm in ("withheld", "supplied")]
+    random.Random(int(seed_hex, 16)).shuffle(expected_order)
+    expected_order_rows = [{"item_id": item_id, "arm": arm} for item_id, arm in expected_order]
+    if order != expected_order_rows:
+        raise StateAccessError("frozen state-access call order differs from its seed")
+    expected_request_keys = {
+        _request_key(item_id, arm) for item_id in item_by_id for arm in ("withheld", "supplied")
+    }
+    if set(request_hashes) != expected_request_keys or len(order) != len(expected_request_keys):
+        raise StateAccessError("frozen state-access request inventory is incomplete or duplicated")
+
+    requests = {}
+    for item_id, item in item_by_id.items():
+        for arm in ("withheld", "supplied"):
+            item_key = sha256(item_id.encode("utf-8")).hexdigest()
+            relative = f"{LOCKED_STATE_ACCESS_DIRECTORY}/requests/{arm}/{item_key}.json"
+            request_raw = _verify_frozen_file(root, files, relative)
+            try:
+                request = json.loads(request_raw, object_pairs_hook=_unique_json_object)
+            except (json.JSONDecodeError, StateAccessError) as exc:
+                raise StateAccessError("frozen state-access request is malformed") from exc
+            expected_state = None if arm == "withheld" else projection_by_id[item_id]
+            if (
+                not isinstance(request, dict)
+                or request != evidence(item, expected_state)
+                or digest(request) != request_hashes[_request_key(item_id, arm)]
+            ):
+                raise StateAccessError("frozen state-access request is not bound to its item and arm")
+            requests[(item_id, arm)] = request
+        withheld = requests[(item_id, "withheld")]
+        supplied = requests[(item_id, "supplied")]
+        if {key: value for key, value in withheld.items() if key != "effective_state"} != {
+            key: value for key, value in supplied.items() if key != "effective_state"
+        }:
+            raise StateAccessError("paired state-access requests differ outside effective_state")
+    freeze_sha = sha256((root / "freeze-manifest.json").read_bytes()).hexdigest()
+    return root, items, input_manifest, freeze_manifest, freeze_sha, plan, requests
+
+
+def _read_attempt_records(
+    run_root: Path,
+    plan: Mapping[str, object],
+    requests: Mapping[tuple[str, str], object],
+    *,
+    run_id: str,
+):
+    expected = set(requests)
+    records = {}
+    result_root = run_root / "results"
+    allowed = {
+        (arm, f"{sha256(item_id.encode('utf-8')).hexdigest()}.json")
+        for item_id, arm in expected
+    }
+    if result_root.exists():
+        for path in result_root.rglob("*.json"):
+            if (path.parent.name, path.name) not in allowed:
+                raise StateAccessError("state-access run directory contains an unknown result record")
+    for item_id, arm in expected:
+        path = _result_path(run_root, item_id, arm)
+        if not path.exists():
+            continue
+        record = _read_json(path, "state-access attempt record")
+        expected_request_hash = plan["request_sha256"][_request_key(item_id, arm)]
+        if (
+            record.get("record_version") != "paper2-state-access-attempt-1"
+            or record.get("run_id") != run_id
+            or record.get("item_id") != item_id
+            or record.get("arm") != arm
+            or record.get("attempt_number") != 1
+            or record.get("plan_sha256") != plan.get("plan_sha256")
+            or record.get("request_sha256") != expected_request_hash
+            or record.get("status") not in {"started", "completed", "technical_failure"}
+        ):
+            raise StateAccessError("state-access attempt record is not bound to its frozen request")
+        if record["status"] == "completed" and not isinstance(record.get("raw_response"), Mapping):
+            raise StateAccessError("completed state-access attempt lacks its raw response")
+        records[(item_id, arm)] = record
+    return records
+
+
+def _attempt_summary(records: Mapping[tuple[str, str], Mapping[str, object]], planned: int) -> dict[str, int]:
+    statuses = Counter(record["status"] for record in records.values())
+    return {
+        "planned_requests": planned,
+        "attempts": len(records),
+        "completed": statuses["completed"],
+        "technical_failures": statuses["technical_failure"],
+        "ambiguous_incomplete": statuses["started"],
+        "not_attempted": planned - len(records),
+    }
+
+
+def _progress_record(
+    *,
+    run_root: Path,
+    run_id: str,
+    plan: Mapping[str, object],
+    freeze_sha: str,
+    records: Mapping[tuple[str, str], Mapping[str, object]],
+    status: str,
+) -> dict[str, object]:
+    results = {
+        _request_key(item_id, arm): sha256(_result_path(run_root, item_id, arm).read_bytes()).hexdigest()
+        for item_id, arm in records
+    }
+    body: dict[str, object] = {
+        "manifest_version": "paper2-state-access-run-manifest-1",
+        "run_id": run_id,
+        "plan_sha256": plan["plan_sha256"],
+        "freeze_manifest_sha256": freeze_sha,
+        "input_manifest_sha256": plan["input_manifest_sha256"],
+        "planned_request_count": plan["planned_request_count"],
+        "result_sha256": results,
+        "status": status,
+        "updated_at_utc": _utc_now(),
+    }
+    body["manifest_sha256"] = digest(body)
+    return body
+
+
+def _run_payload(request: Mapping[str, object]) -> dict[str, object]:
+    return {
+        "model": MODEL,
+        "messages": [
+            {"role": "system", "content": INSTRUCTION},
+            {"role": "user", "content": canonical_json(request)},
+        ],
+        "format": SCHEMA,
+        "options": OPTIONS,
+        "think": False,
+        "stream": False,
+        "keep_alive": "10m",
+    }
+
+
+def run_locked_state_access(freeze_root: str | Path, client: LocalClient) -> dict[str, object]:
+    """Run or safely resume the frozen diagnostic through the local client only."""
+    root, _items, _input_manifest, _freeze_manifest, freeze_sha, plan, requests = _load_locked_state_access_bundle(freeze_root)
+    try:
+        descriptor = client.discover_model(MODEL)
+    except ProviderCallError as exc:
+        raise StateAccessError("pinned local diagnostic model is unavailable") from exc
+    if getattr(descriptor, "model_tag", None) != MODEL or getattr(descriptor, "digest", None) != MODEL_DIGEST:
+        raise StateAccessError("local diagnostic model identity/digest differs from the frozen contract")
+
+    run_root = root / "runs" / "state-access"
+    result_root = run_root / "results"
+    run_root.mkdir(parents=True, exist_ok=True, mode=0o700)
+    os.chmod(run_root, 0o700)
+    lock_path = run_root / ".run.lock"
+    try:
+        lock_fd = os.open(lock_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+    except FileExistsError as exc:
+        raise StateAccessError("another process owns this state-access run") from exc
+    os.close(lock_fd)
+    progress_path = run_root / "run-manifest.json"
+    run_id = uuid4().hex
+    records: dict[tuple[str, str], dict] = {}
+    reused = 0
+    try:
+        existing_progress = None
+        if progress_path.exists():
+            existing_progress = _read_json(progress_path, "state-access run manifest")
+            progress_body = {key: value for key, value in existing_progress.items() if key != "manifest_sha256"}
+            if (
+                digest(progress_body) != existing_progress.get("manifest_sha256")
+                or existing_progress.get("manifest_version") != "paper2-state-access-run-manifest-1"
+                or existing_progress.get("plan_sha256") != plan.get("plan_sha256")
+                or existing_progress.get("freeze_manifest_sha256") != freeze_sha
+                or existing_progress.get("input_manifest_sha256") != plan.get("input_manifest_sha256")
+                or existing_progress.get("status") not in {"running", "complete", "incomplete", "interrupted"}
+            ):
+                raise StateAccessError("existing state-access run manifest is not bound to this frozen plan")
+            run_id = existing_progress.get("run_id")
+            if not isinstance(run_id, str) or not run_id:
+                raise StateAccessError("existing state-access run ID is malformed")
+
+        records = _read_attempt_records(run_root, plan, requests, run_id=run_id)
+        reused = len(records)
+        if existing_progress is not None:
+            frozen_result_hashes = existing_progress.get("result_sha256")
+            if not isinstance(frozen_result_hashes, Mapping):
+                raise StateAccessError("existing state-access result hash inventory is malformed")
+            if set(frozen_result_hashes) - {_request_key(item_id, arm) for item_id, arm in records}:
+                raise StateAccessError("state-access manifest refers to an absent attempt")
+            for (item_id, arm), record in records.items():
+                key = _request_key(item_id, arm)
+                if key in frozen_result_hashes:
+                    actual = sha256(_result_path(run_root, item_id, arm).read_bytes()).hexdigest()
+                    if actual != frozen_result_hashes[key]:
+                        raise StateAccessError("state-access attempt changed after it was recorded")
+
+        def persist_progress(status: str) -> None:
+            progress = _progress_record(
+                run_root=run_root,
+                run_id=run_id,
+                plan=plan,
+                freeze_sha=freeze_sha,
+                records=records,
+                status=status,
+            )
+            _write_json(progress_path, progress)
+
+        persist_progress("running")
+        randomization = plan["randomization"]
+        for entry in randomization["order"]:
+            item_id, arm = entry["item_id"], entry["arm"]
+            request_key = (item_id, arm)
+            if request_key in records:
+                continue
+            request = requests[request_key]
+            result_path = _result_path(run_root, item_id, arm)
+            started_at = _utc_now()
+            started = {
+                "record_version": "paper2-state-access-attempt-1",
+                "run_id": run_id,
+                "item_id": item_id,
+                "arm": arm,
+                "attempt_number": 1,
+                "plan_sha256": plan["plan_sha256"],
+                "request_sha256": plan["request_sha256"][_request_key(item_id, arm)],
+                "started_at_utc": started_at,
+                "completed_at_utc": None,
+                "status": "started",
+                "error": None,
+                "raw_error_response": None,
+                "raw_response": None,
+            }
+            _write_json(result_path, started, replace=False)
+            records[request_key] = started
+            persist_progress("running")
+            try:
+                raw_response = client.chat(_run_payload(request))
+                if not isinstance(raw_response, Mapping):
+                    terminal = {**started, "status": "technical_failure", "error": "invalid_local_response_shape"}
+                else:
+                    terminal = {**started, "status": "completed", "raw_response": dict(raw_response)}
+            except ProviderCallError as exc:
+                terminal = {
+                    **started,
+                    "status": "technical_failure",
+                    "error": exc.code,
+                    "raw_error_response": exc.raw_response,
+                }
+            terminal["completed_at_utc"] = _utc_now()
+            _write_json(result_path, terminal)
+            records[request_key] = terminal
+            persist_progress("running")
+
+        summary = _attempt_summary(records, int(plan["planned_request_count"]))
+        complete = summary["not_attempted"] == 0 and summary["ambiguous_incomplete"] == 0
+        persist_progress("complete" if complete else "incomplete")
+        return {"run_id": run_id, "status": "complete" if complete else "incomplete", "reused": reused, **summary}
+    except BaseException:
+        try:
+            if records:
+                persist_progress("interrupted")
+        except Exception:
+            pass
+        raise
+    finally:
+        try:
+            lock_path.unlink()
+        except FileNotFoundError:
+            pass
