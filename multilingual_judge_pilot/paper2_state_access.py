@@ -524,6 +524,44 @@ def analyze_locked_state_access(
 ) -> dict[str, object]:
     """Validate retained attempts, join reference data post-inference, and write deterministic analysis."""
     root, items, input_manifest, freeze_manifest, freeze_sha, plan, requests = _load_locked_state_access_bundle(freeze_root)
+    run_root = root / "runs" / "state-access"
+    run_root.mkdir(parents=True, exist_ok=True, mode=0o700)
+    os.chmod(run_root, 0o700)
+    lock_path = run_root / ".run.lock"
+    try:
+        lock_fd = os.open(lock_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+    except FileExistsError as exc:
+        raise StateAccessError("cannot analyze while an active state-access run lock exists") from exc
+    os.close(lock_fd)
+    try:
+        return _analyze_locked_state_access_loaded(
+            root,
+            items,
+            input_manifest,
+            freeze_manifest,
+            freeze_sha,
+            plan,
+            requests,
+            output_path=output_path,
+        )
+    finally:
+        try:
+            lock_path.unlink()
+        except FileNotFoundError:
+            pass
+
+
+def _analyze_locked_state_access_loaded(
+    root: Path,
+    items: Sequence[Mapping[str, object]],
+    input_manifest: Mapping[str, object],
+    freeze_manifest: Mapping[str, object],
+    freeze_sha: str,
+    plan: Mapping[str, object],
+    requests: Mapping[tuple[str, str], object],
+    *,
+    output_path: str | Path | None,
+) -> dict[str, object]:
     run_root = (root / "runs" / "state-access").resolve()
     output = (Path(output_path).expanduser().resolve() if output_path is not None else run_root / "analysis.json")
     reserved_output_names = {"run-manifest.json", ".run.lock", "results", "reference-analysis"}
@@ -531,8 +569,6 @@ def analyze_locked_state_access(
         raise StateAccessError("state-access analysis output must be a dedicated file directly inside the frozen diagnostic run directory")
     item_by_id = {str(item["item_id"]): item for item in items}
     item_ids = set(item_by_id)
-    if (run_root / ".run.lock").exists():
-        raise StateAccessError("cannot analyze while an active state-access run lock exists")
     progress_path = run_root / "run-manifest.json"
     if not progress_path.exists():
         raise StateAccessError("analysis requires a settled state-access inference run before reading references")
