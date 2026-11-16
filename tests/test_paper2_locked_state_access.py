@@ -436,7 +436,7 @@ def test_analysis_rejects_output_path_outside_the_diagnostic_run_directory(tmp_p
     freeze_root = _synthetic_freeze(tmp_path)
     outside_output = tmp_path / "public-analysis.json"
 
-    with pytest.raises(StateAccessError, match="dedicated file directly inside the frozen diagnostic run directory"):
+    with pytest.raises(StateAccessError, match="dedicated analysis.json path"):
         analyze_locked_state_access(freeze_root, output_path=outside_output)
 
     assert not outside_output.exists()
@@ -447,10 +447,27 @@ def test_analysis_rejects_output_path_that_could_replace_a_raw_result(tmp_path):
     freeze_root = _synthetic_freeze(tmp_path)
     output_inside_results = freeze_root / "runs" / "state-access" / "results" / "withheld" / "analysis.json"
 
-    with pytest.raises(StateAccessError, match="dedicated file directly inside the frozen diagnostic run directory"):
+    with pytest.raises(StateAccessError, match="dedicated analysis.json path"):
         analyze_locked_state_access(freeze_root, output_path=output_inside_results)
 
     assert not output_inside_results.exists()
+
+
+def test_analysis_rejects_output_path_that_could_replace_its_checksum(tmp_path):
+    freeze_root = _synthetic_freeze(tmp_path)
+    run_locked_state_access(freeze_root, _SyntheticLocalClient())
+    report = analyze_locked_state_access(freeze_root)
+    report_path = freeze_root / "runs" / "state-access" / "analysis.json"
+    checksum_path = report_path.with_suffix(".json.sha256")
+    original_report = report_path.read_bytes()
+    original_checksum = checksum_path.read_bytes()
+
+    with pytest.raises(StateAccessError, match="dedicated analysis.json path"):
+        analyze_locked_state_access(freeze_root, output_path=checksum_path)
+
+    assert report_path.read_bytes() == original_report
+    assert checksum_path.read_bytes() == original_checksum
+    assert report["analysis_sha256"] == analyze_locked_state_access(freeze_root)["analysis_sha256"]
 
 
 def test_analysis_requires_a_settled_run_before_reading_references(tmp_path):

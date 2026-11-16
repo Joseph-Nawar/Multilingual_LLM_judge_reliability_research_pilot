@@ -564,9 +564,8 @@ def _analyze_locked_state_access_loaded(
 ) -> dict[str, object]:
     run_root = (root / "runs" / "state-access").resolve()
     output = (Path(output_path).expanduser().resolve() if output_path is not None else run_root / "analysis.json")
-    reserved_output_names = {"run-manifest.json", ".run.lock", "results", "reference-analysis"}
-    if output.parent != run_root or output.name in reserved_output_names:
-        raise StateAccessError("state-access analysis output must be a dedicated file directly inside the frozen diagnostic run directory")
+    if output.parent != run_root or output.name != "analysis.json":
+        raise StateAccessError("state-access analysis output must use the dedicated analysis.json path inside the frozen diagnostic run directory")
     item_by_id = {str(item["item_id"]): item for item in items}
     item_ids = set(item_by_id)
     progress_path = run_root / "run-manifest.json"
